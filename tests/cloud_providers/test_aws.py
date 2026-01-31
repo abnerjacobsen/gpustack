@@ -587,7 +587,7 @@ async def test_get_instance_public_ip_extraction(aws_client):
     assert instance_id is not None
 
     # Get instance - moto instances don't have public IPs by default
-    # but we verify the extraction logic works
+    # but we verify the extraction logic works without errors
     instance = await aws_client.get_instance(instance_id)
     assert instance is not None
     # IP may be None in moto, but extraction code should work without errors
@@ -1133,3 +1133,561 @@ async def test_wait_for_public_ip_exponential_backoff():
     assert sleep_calls[2] == 4  # backoff * 2^2 = 4
     assert sleep_calls[3] == 8  # backoff * 2^3 = 8
     assert sleep_calls[4] == 16  # backoff * 2^4 = 16
+
+
+# EBS Volume Tests
+
+
+def _create_mock_client_context():
+    """Helper to create a mock AWS client context for testing."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_client = AsyncMock()
+
+    # Default successful responses
+    mock_client.describe_instances.return_value = {
+        "Reservations": [
+            {
+                "Instances": [
+                    {
+                        "Placement": {"AvailabilityZone": "us-east-1a"},
+                        "State": {"Name": "running"},
+                    }
+                ]
+            }
+        ]
+    }
+
+    # Create waiter mock - get_waiter() is sync, returns waiter with async wait() method
+    mock_waiter = MagicMock()
+    mock_waiter.wait = AsyncMock(return_value=None)
+    mock_client.get_waiter = MagicMock(return_value=mock_waiter)
+
+    # Create context manager that returns mock_client
+    class MockContextManager:
+        async def __aenter__(self):
+            return mock_client
+
+        async def __aexit__(self, *args):
+            return False
+
+    return mock_client, MockContextManager()
+
+
+@pytest.mark.asyncio
+async def test_create_volumes_and_attach_success():
+    """Test successful creation and attachment of EBS volumes."""
+    from gpustack.schemas.clusters import Volume
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    # Setup mock client and context
+    mock_client, mock_context = _create_mock_client_context()
+
+    # Configure volume creation responses
+    mock_client.create_volume.side_effect = [
+        {"VolumeId": "vol-12345"},
+        {"VolumeId": "vol-67890"},
+    ]
+
+    # Replace _get_client method
+    original_get_client = client._get_client
+    client._get_client = lambda: mock_context
+
+    try:
+        # Execute test with 2 volumes
+        volumes = [
+            Volume(size_gb=100, format="ext4", name="data-vol"),
+            Volume(size_gb=500, format="xfs", name="model-vol"),
+        ]
+        result = await client.create_volumes_and_attach(
+            1, "i-12345", "us-east-1", *volumes
+        )
+
+        # Assertions
+        assert result == ["vol-12345", "vol-67890"]
+
+        # Verify describe_instances called
+        mock_client.describe_instances.assert_called_once_with(InstanceIds=["i-12345"])
+
+        # Verify create_volume called with correct parameters
+        assert mock_client.create_volume.call_count == 2
+
+        # First volume call
+        call1 = mock_client.create_volume.call_args_list[0]
+        assert call1.kwargs["AvailabilityZone"] == "us-east-1a"
+        assert call1.kwargs["Size"] == 100
+        assert call1.kwargs["VolumeType"] == "gp3"
+        assert call1.kwargs["Encrypted"] is True
+
+        # Second volume call
+        call2 = mock_client.create_volume.call_args_list[1]
+        assert call2.kwargs["AvailabilityZone"] == "us-east-1a"
+        assert call2.kwargs["Size"] == 500
+
+        # Verify attach_volume called with correct device names
+        assert mock_client.attach_volume.call_count == 2
+        attach_calls = mock_client.attach_volume.call_args_list
+
+        # First volume: /dev/sdf (idx=0)
+        assert attach_calls[0].kwargs["VolumeId"] == "vol-12345"
+        assert attach_calls[0].kwargs["InstanceId"] == "i-12345"
+        assert attach_calls[0].kwargs["Device"] == "/dev/sdf"
+
+        # Second volume: /dev/sdg (idx=1)
+        assert attach_calls[1].kwargs["VolumeId"] == "vol-67890"
+        assert attach_calls[1].kwargs["InstanceId"] == "i-12345"
+        assert attach_calls[1].kwargs["Device"] == "/dev/sdg"
+    finally:
+        client._get_client = original_get_client
+
+
+@pytest.mark.asyncio
+async def test_create_volumes_and_attach_no_volumes():
+    """Test create_volumes_and_attach with no volumes returns empty list."""
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    # Call with no volumes
+    result = await client.create_volumes_and_attach(1, "i-12345", "us-east-1")
+
+    # Should return empty list without making any AWS API calls
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_create_volumes_and_attach_instance_not_found():
+    """Test error handling when instance is not found."""
+    from botocore.exceptions import ClientError
+    from gpustack.schemas.clusters import Volume
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    # Setup mock client and context
+    mock_client, mock_context = _create_mock_client_context()
+
+    # Configure to raise error
+    error_response = {
+        "Error": {"Code": "InvalidInstanceID.NotFound", "Message": "Instance not found"}
+    }
+    mock_client.describe_instances.side_effect = ClientError(
+        error_response, "DescribeInstances"
+    )
+
+    # Replace _get_client method
+    original_get_client = client._get_client
+    client._get_client = lambda: mock_context
+
+    try:
+        volume = Volume(size_gb=100, format="ext4", name="test-vol")
+
+        with pytest.raises(RuntimeError, match="Instance i-12345 not found"):
+            await client.create_volumes_and_attach(1, "i-12345", "us-east-1", volume)
+    finally:
+        client._get_client = original_get_client
+
+
+@pytest.mark.asyncio
+async def test_create_volume_validation_invalid_size():
+    """Test validation fails for invalid size_gb values."""
+    from gpustack.schemas.clusters import Volume
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    # Setup mock client and context
+    mock_client, mock_context = _create_mock_client_context()
+
+    # Replace _get_client method
+    original_get_client = client._get_client
+    client._get_client = lambda: mock_context
+
+    try:
+        # Test size_gb = 0
+        volume_zero = Volume(size_gb=0, format="ext4", name="test-vol")
+
+        with pytest.raises(ValueError, match="missing or invalid .size_gb."):
+            await client.create_volumes_and_attach(
+                1, "i-12345", "us-east-1", volume_zero
+            )
+
+        # Test negative size
+        volume_negative = Volume(size_gb=-10, format="ext4", name="test-vol")
+
+        with pytest.raises(ValueError, match="missing or invalid .size_gb."):
+            await client.create_volumes_and_attach(
+                1, "i-12345", "us-east-1", volume_negative
+            )
+    finally:
+        client._get_client = original_get_client
+
+
+@pytest.mark.asyncio
+async def test_create_volume_validation_invalid_format():
+    """Test validation fails for invalid format values."""
+    from gpustack.schemas.clusters import Volume
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    # Setup mock client and context
+    mock_client, mock_context = _create_mock_client_context()
+
+    # Replace _get_client method
+    original_get_client = client._get_client
+    client._get_client = lambda: mock_context
+
+    try:
+        # Test format = 'ntfs' (not allowed)
+        volume_ntfs = Volume(size_gb=100, format="ntfs", name="test-vol")
+
+        with pytest.raises(ValueError, match="has invalid .format.: ntfs"):
+            await client.create_volumes_and_attach(
+                1, "i-12345", "us-east-1", volume_ntfs
+            )
+
+        # Test format = None
+        volume_none = Volume(size_gb=100, format=None, name="test-vol")
+
+        with pytest.raises(ValueError, match="has invalid .format.: None"):
+            await client.create_volumes_and_attach(
+                1, "i-12345", "us-east-1", volume_none
+            )
+    finally:
+        client._get_client = original_get_client
+
+
+@pytest.mark.asyncio
+async def test_create_volumes_and_attach_too_many_volumes():
+    """Test error when trying to attach more than 11 volumes."""
+    from unittest.mock import MagicMock
+    from gpustack.schemas.clusters import Volume
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    # Create 12 volumes (max is 11)
+    volumes = [Volume(size_gb=10, format="ext4", name=f"vol-{i}") for i in range(12)]
+
+    # Setup mock client and context - we need to track calls to verify we stop at 11
+    call_count = [0]
+
+    async def mock_create_volume(*args, **kwargs):
+        call_count[0] += 1
+        return {"VolumeId": f"vol-{call_count[0]}"}
+
+    mock_client, mock_context = _create_mock_client_context()
+    mock_client.create_volume.side_effect = mock_create_volume
+
+    # Replace _get_client method
+    original_get_client = client._get_client
+    client._get_client = lambda: mock_context
+
+    try:
+        # 12th volume (idx=11) should raise ValueError for device naming
+        with pytest.raises(ValueError, match="exceeds maximum of 10"):
+            await client.create_volumes_and_attach(1, "i-12345", "us-east-1", *volumes)
+
+        # Verify we attempted to create all volumes before failing on attachment
+        # (volumes are created first, then attached - error happens at attachment)
+        assert call_count[0] == 12
+    finally:
+        client._get_client = original_get_client
+
+
+@pytest.mark.asyncio
+async def test_create_volumes_and_attach_cleanup_on_failure():
+    """Test cleanup of created volumes when attachment fails."""
+    from unittest.mock import AsyncMock
+    from botocore.exceptions import ClientError
+    from gpustack.schemas.clusters import Volume
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    # Setup mock client and context
+    mock_client, mock_context = _create_mock_client_context()
+
+    mock_client.create_volume.return_value = {"VolumeId": "vol-12345"}
+
+    # First attach succeeds, second fails
+    error_response = {
+        "Error": {
+            "Code": "AttachmentLimitExceeded",
+            "Message": "Volume attachment limit exceeded",
+        }
+    }
+    mock_client.attach_volume.side_effect = [
+        {"State": "attaching"},  # First succeeds
+        ClientError(error_response, "AttachVolume"),  # Second fails
+    ]
+
+    # Replace _get_client method
+    original_get_client = client._get_client
+    client._get_client = lambda: mock_context
+
+    try:
+        volumes = [
+            Volume(size_gb=100, format="ext4", name="vol-1"),
+            Volume(size_gb=200, format="ext4", name="vol-2"),
+        ]
+
+        with pytest.raises(RuntimeError, match="Volume attachment limit exceeded"):
+            await client.create_volumes_and_attach(1, "i-12345", "us-east-1", *volumes)
+
+        # Verify cleanup: delete_volume should be called for created volume
+        mock_client.delete_volume.assert_called_with(VolumeId="vol-12345")
+    finally:
+        client._get_client = original_get_client
+
+
+@pytest.mark.asyncio
+async def test_create_volumes_and_attach_zone_mismatch():
+    """Test handling of InvalidVolume.ZoneMismatch error."""
+    from botocore.exceptions import ClientError
+    from gpustack.schemas.clusters import Volume
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    # Setup mock client and context
+    mock_client, mock_context = _create_mock_client_context()
+
+    # Simulate ZoneMismatch error during create_volume
+    error_response = {
+        "Error": {
+            "Code": "InvalidVolume.ZoneMismatch",
+            "Message": "Volume and instance are in different AZs",
+        }
+    }
+    mock_client.create_volume.side_effect = ClientError(error_response, "CreateVolume")
+
+    # Replace _get_client method
+    original_get_client = client._get_client
+    client._get_client = lambda: mock_context
+
+    try:
+        volume = Volume(size_gb=100, format="ext4", name="test-vol")
+
+        with pytest.raises(RuntimeError, match="Volume AZ mismatch"):
+            await client.create_volumes_and_attach(1, "i-12345", "us-east-1", volume)
+    finally:
+        client._get_client = original_get_client
+
+
+@pytest.mark.asyncio
+async def test_create_volumes_and_attach_attachment_limit_exceeded():
+    """Test handling of AttachmentLimitExceeded error."""
+    from unittest.mock import AsyncMock
+    from botocore.exceptions import ClientError
+    from gpustack.schemas.clusters import Volume
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    # Setup mock client and context
+    mock_client, mock_context = _create_mock_client_context()
+
+    mock_client.create_volume.return_value = {"VolumeId": "vol-12345"}
+
+    # Simulate AttachmentLimitExceeded during attach
+    error_response = {
+        "Error": {
+            "Code": "AttachmentLimitExceeded",
+            "Message": "The maximum number of attachments has been reached",
+        }
+    }
+    mock_client.attach_volume.side_effect = ClientError(error_response, "AttachVolume")
+
+    # Replace _get_client method
+    original_get_client = client._get_client
+    client._get_client = lambda: mock_context
+
+    try:
+        volume = Volume(size_gb=100, format="ext4", name="test-vol")
+
+        with pytest.raises(RuntimeError, match="Volume attachment limit exceeded"):
+            await client.create_volumes_and_attach(1, "i-12345", "us-east-1", volume)
+
+        # Verify cleanup called
+        mock_client.delete_volume.assert_called_once_with(VolumeId="vol-12345")
+    finally:
+        client._get_client = original_get_client
+
+
+@pytest.mark.asyncio
+async def test_create_volumes_and_attach_volume_not_available():
+    """Test handling when volume_available waiter times out."""
+    from unittest.mock import AsyncMock
+    from botocore.exceptions import ClientError
+    from gpustack.schemas.clusters import Volume
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    # Setup mock client and context
+    mock_client, mock_context = _create_mock_client_context()
+
+    mock_client.create_volume.return_value = {"VolumeId": "vol-12345"}
+
+    # Simulate waiter timeout - get_waiter is sync, returns waiter with async wait
+    from unittest.mock import MagicMock
+
+    mock_waiter = MagicMock()
+    error_response = {
+        "Error": {"Code": "WaiterError", "Message": "Waiter volume_available failed"}
+    }
+    mock_waiter.wait = AsyncMock(side_effect=ClientError(error_response, "Wait"))
+    mock_client.get_waiter = MagicMock(return_value=mock_waiter)
+
+    # Replace _get_client method
+    original_get_client = client._get_client
+    client._get_client = lambda: mock_context
+
+    try:
+        volume = Volume(size_gb=100, format="ext4", name="test-vol")
+
+        # The waiter failure should raise a RuntimeError
+        with pytest.raises(RuntimeError):
+            await client.create_volumes_and_attach(1, "i-12345", "us-east-1", volume)
+
+        # Note: Cleanup is attempted but may not complete due to mock limitations
+        # The key behavior is that the error is properly propagated
+    finally:
+        client._get_client = original_get_client
+
+
+@pytest.mark.asyncio
+async def test_get_instance_az_success():
+    """Test _get_instance_az helper returns correct AZ."""
+    from unittest.mock import AsyncMock
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    mock_client = AsyncMock()
+    mock_client.describe_instances.return_value = {
+        "Reservations": [
+            {
+                "Instances": [
+                    {
+                        "InstanceId": "i-12345",
+                        "Placement": {"AvailabilityZone": "us-west-2b"},
+                        "State": {"Name": "running"},
+                    }
+                ]
+            }
+        ]
+    }
+
+    az = await client._get_instance_az(mock_client, "i-12345")
+    assert az == "us-west-2b"
+
+
+@pytest.mark.asyncio
+async def test_get_instance_az_not_found():
+    """Test _get_instance_az raises RuntimeError for non-existent instance."""
+    from unittest.mock import AsyncMock
+    from botocore.exceptions import ClientError
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    mock_client = AsyncMock()
+    error_response = {
+        "Error": {"Code": "InvalidInstanceID.NotFound", "Message": "Instance not found"}
+    }
+    mock_client.describe_instances.side_effect = ClientError(
+        error_response, "DescribeInstances"
+    )
+
+    with pytest.raises(RuntimeError, match="Instance i-nonexistent not found"):
+        await client._get_instance_az(mock_client, "i-nonexistent")
+
+
+@pytest.mark.asyncio
+async def test_create_volume_tagging():
+    """Test that volume tagging structure is correct."""
+    from unittest.mock import AsyncMock, MagicMock
+    from gpustack.schemas.clusters import Volume
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    mock_client = AsyncMock()
+    mock_client.create_volume.return_value = {"VolumeId": "vol-12345"}
+
+    # Use MagicMock for get_waiter (sync) and AsyncMock for wait (async)
+    mock_waiter = MagicMock()
+    mock_waiter.wait = AsyncMock(return_value=None)
+    mock_client.get_waiter = MagicMock(return_value=mock_waiter)
+
+    volume = Volume(size_gb=100, format="ext4", name="my-data-vol")
+
+    await client._create_volume(mock_client, "us-east-1a", 42, 3, volume)
+
+    # Verify create_volume was called
+    mock_client.create_volume.assert_called_once()
+    call_args = mock_client.create_volume.call_args
+
+    # Verify TagSpecifications structure
+    tag_specs = call_args.kwargs["TagSpecifications"]
+    assert len(tag_specs) == 1
+    assert tag_specs[0]["ResourceType"] == "volume"
+
+    # Extract tags into dict for easier verification
+    tags = {tag["Key"]: tag["Value"] for tag in tag_specs[0]["Tags"]}
+
+    # Verify all required tags are present
+    assert tags["Name"] == "my-data-vol-42"
+    assert tags["ManagedBy"] == "GPUStack"
+    assert tags["WorkerId"] == "42"
+    assert tags["VolumeIndex"] == "3"
+    assert tags["Format"] == "ext4"
+
+    # Verify other parameters
+    assert call_args.kwargs["AvailabilityZone"] == "us-east-1a"
+    assert call_args.kwargs["Size"] == 100
+    assert call_args.kwargs["VolumeType"] == "gp3"
+    assert call_args.kwargs["Encrypted"] is True
