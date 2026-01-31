@@ -876,3 +876,260 @@ async def test_wait_for_started_backoff_cap():
     assert sleep_calls[4] == 60  # capped
     assert sleep_calls[5] == 60  # capped
     assert sleep_calls[6] == 60  # capped
+
+
+# wait_for_public_ip() Tests
+
+
+@pytest.mark.asyncio
+async def test_wait_for_public_ip_success():
+    """Test wait_for_public_ip returns instance when IP is assigned."""
+    from unittest.mock import AsyncMock, patch
+    from gpustack.cloud_providers.abstract import CloudInstance, InstanceState
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    # Mock instance without IP initially, then with IP
+    call_count = [0]
+
+    async def mock_get_instance(external_id):
+        call_count[0] += 1
+        if call_count[0] <= 2:
+            # First 2 calls: no IP
+            return CloudInstance(
+                external_id=external_id,
+                name="test-worker",
+                image="ami-test",
+                type="g4dn.xlarge",
+                region="us-east-1",
+                ssh_key_id="key-123",
+                status=InstanceState.RUNNING,
+                ip_address=None,
+            )
+        # Third call: has IP
+        return CloudInstance(
+            external_id=external_id,
+            name="test-worker",
+            image="ami-test",
+            type="g4dn.xlarge",
+            region="us-east-1",
+            ssh_key_id="key-123",
+            status=InstanceState.RUNNING,
+            ip_address="54.123.45.67",
+        )
+
+    with patch.object(client, "get_instance", side_effect=mock_get_instance):
+        instance = await client.wait_for_public_ip("i-test123", backoff=0.01, limit=5)
+
+    assert instance is not None
+    assert instance.external_id == "i-test123"
+    assert instance.ip_address == "54.123.45.67"
+    assert call_count[0] == 3  # 2 without IP + 1 with IP
+
+
+@pytest.mark.asyncio
+async def test_wait_for_public_ip_already_has_ip():
+    """Test wait_for_public_ip returns immediately if instance already has IP."""
+    from unittest.mock import AsyncMock, patch
+    from gpustack.cloud_providers.abstract import CloudInstance, InstanceState
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    mock_instance = CloudInstance(
+        external_id="i-test123",
+        name="already-has-ip-worker",
+        image="ami-test",
+        type="g4dn.xlarge",
+        region="us-east-1",
+        ssh_key_id="key-123",
+        status=InstanceState.RUNNING,
+        ip_address="54.123.45.67",
+    )
+
+    with patch.object(
+        client, "get_instance", new=AsyncMock(return_value=mock_instance)
+    ) as mock_get:
+        instance = await client.wait_for_public_ip("i-test123", backoff=0.1, limit=5)
+
+        # Should return immediately (only called once)
+        assert instance is not None
+        assert instance.ip_address == "54.123.45.67"
+        assert mock_get.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_wait_for_public_ip_timeout():
+    """Test wait_for_public_ip raises TimeoutError when limit exceeded."""
+    from unittest.mock import AsyncMock, patch
+    from gpustack.cloud_providers.abstract import CloudInstance, InstanceState
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    # Mock instance always without IP
+    mock_instance = CloudInstance(
+        external_id="i-test123",
+        name="timeout-worker",
+        image="ami-test",
+        type="g4dn.xlarge",
+        region="us-east-1",
+        ssh_key_id="key-123",
+        status=InstanceState.RUNNING,
+        ip_address=None,
+    )
+
+    with patch.object(
+        client, "get_instance", new=AsyncMock(return_value=mock_instance)
+    ):
+        # Should raise TimeoutError after limit attempts
+        with pytest.raises(TimeoutError, match="did not receive a public IP"):
+            await client.wait_for_public_ip("i-test123", backoff=0.01, limit=3)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_public_ip_not_found_retry():
+    """Test wait_for_public_ip retries when instance not yet visible (NotFound)."""
+    from unittest.mock import patch
+    from gpustack.cloud_providers.abstract import CloudInstance, InstanceState
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    # Mock get_instance to return None first, then instance with IP
+    call_count = [0]
+
+    async def mock_get_instance(external_id):
+        call_count[0] += 1
+        if call_count[0] <= 2:
+            return None  # Simulate NotFound / eventual consistency
+        return CloudInstance(
+            external_id=external_id,
+            name="retry-test",
+            image="ami-test",
+            type="g4dn.xlarge",
+            region="us-east-1",
+            ssh_key_id="key-123",
+            status=InstanceState.RUNNING,
+            ip_address="54.123.45.67",
+        )
+
+    with patch.object(client, "get_instance", side_effect=mock_get_instance):
+        instance = await client.wait_for_public_ip("i-retry123", backoff=0.01, limit=5)
+
+    # Should have retried and eventually returned the instance with IP
+    assert instance is not None
+    assert instance.ip_address == "54.123.45.67"
+    assert call_count[0] == 3  # 2 None responses + 1 with IP
+
+
+@pytest.mark.asyncio
+async def test_wait_for_public_ip_empty_string():
+    """Test wait_for_public_ip continues polling when ip_address is empty string."""
+    from unittest.mock import patch
+    from gpustack.cloud_providers.abstract import CloudInstance, InstanceState
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    # Mock instance with empty string IP initially, then real IP
+    call_count = [0]
+
+    async def mock_get_instance(external_id):
+        call_count[0] += 1
+        if call_count[0] <= 2:
+            # First 2 calls: empty string IP
+            return CloudInstance(
+                external_id=external_id,
+                name="empty-ip-worker",
+                image="ami-test",
+                type="g4dn.xlarge",
+                region="us-east-1",
+                ssh_key_id="key-123",
+                status=InstanceState.RUNNING,
+                ip_address="",  # Empty string should not be treated as valid IP
+            )
+        # Third call: has real IP
+        return CloudInstance(
+            external_id=external_id,
+            name="empty-ip-worker",
+            image="ami-test",
+            type="g4dn.xlarge",
+            region="us-east-1",
+            ssh_key_id="key-123",
+            status=InstanceState.RUNNING,
+            ip_address="54.123.45.67",
+        )
+
+    with patch.object(client, "get_instance", side_effect=mock_get_instance):
+        instance = await client.wait_for_public_ip("i-test123", backoff=0.01, limit=5)
+
+    # Should have continued polling through empty string IPs
+    assert instance is not None
+    assert instance.ip_address == "54.123.45.67"
+    assert call_count[0] == 3
+
+
+@pytest.mark.asyncio
+async def test_wait_for_public_ip_exponential_backoff():
+    """Test that wait_for_public_ip uses exponential backoff."""
+    from unittest.mock import AsyncMock, patch
+    import asyncio
+    from gpustack.cloud_providers.abstract import CloudInstance, InstanceState
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    # Mock instance always without IP
+    mock_instance = CloudInstance(
+        external_id="i-test123",
+        name="backoff-test",
+        image="ami-test",
+        type="g4dn.xlarge",
+        region="us-east-1",
+        ssh_key_id="key-123",
+        status=InstanceState.RUNNING,
+        ip_address=None,
+    )
+
+    # Track sleep calls
+    sleep_calls = []
+
+    async def mock_sleep(duration):
+        sleep_calls.append(duration)
+
+    with patch.object(
+        client, "get_instance", new=AsyncMock(return_value=mock_instance)
+    ):
+        with patch("asyncio.sleep", side_effect=mock_sleep):
+            try:
+                await client.wait_for_public_ip("i-test123", backoff=1, limit=5)
+            except TimeoutError:
+                pass  # Expected
+
+    # Verify exponential backoff pattern
+    assert len(sleep_calls) == 5  # 5 attempts, 5 sleeps
+    assert sleep_calls[0] == 1  # backoff * 2^0 = 1
+    assert sleep_calls[1] == 2  # backoff * 2^1 = 2
+    assert sleep_calls[2] == 4  # backoff * 2^2 = 4
+    assert sleep_calls[3] == 8  # backoff * 2^3 = 8
+    assert sleep_calls[4] == 16  # backoff * 2^4 = 16
