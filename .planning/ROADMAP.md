@@ -76,6 +76,12 @@ This roadmap delivers AWS EC2 GPU instance support to GPUStack through 6 increme
 3. System returns the key pair name for use in instance creation
 4. User can delete an EC2 key pair and it is removed from AWS
 
+**Plans:** 2 plans in 2 waves
+
+Plans:
+- [ ] 02-01-PLAN.md — Implement create_ssh_key with import_key_pair, collision detection, and tagging
+- [ ] 02-02-PLAN.md — Implement delete_ssh_key and comprehensive unit tests
+
 ---
 
 ## Phase 3: Core EC2 Operations
