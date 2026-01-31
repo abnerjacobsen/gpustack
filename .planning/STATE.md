@@ -1,9 +1,9 @@
 # GPUStack AWS Cloud Provider - Project State
 
 **Project:** AWS EC2 GPU Integration for GPUStack  
-**Current Phase:** 2 - SSH Key Management ✓ **COMPLETE**  
+**Current Phase:** 3 - Core EC2 Operations ✓ **COMPLETE**  
 **Last Updated:** 2026-01-31  
-**Status:** Phase 2 Complete, Ready for Phase 3
+**Status:** Phase 3 Complete - Full EC2 Instance Lifecycle Implemented
 
 ---
 
@@ -18,6 +18,9 @@
 - **Factory Registration:** AWSClient registered with credential extraction lambda
 - **Credential Validation:** EC2 describe_regions for lightweight auth check
 - **Testing:** moto mock_aws decorator for AWS API mocking
+- **Idempotent Deletion:** InvalidInstanceID.NotFound and IncorrectState treated as success
+- **State Mapping:** AWS states (pending, running, etc.) mapped to InstanceState enum
+- **Public IP Extraction:** Priority - NetworkInterfaces first, then PublicIpAddress
 
 **Constraints:**
 - Python 3.10+, async codebase (FastAPI, SQLModel)
@@ -28,9 +31,9 @@
 
 ## Current Position
 
-**Active Phase:** Phase 3 - Core EC2 Operations (Planned, ready for execution)
+**Active Phase:** Phase 4 - Instance Lifecycle Waiting (Ready to start)
 
-**Previous Phase:** Phase 2 - SSH Key Management ✓ **COMPLETE**
+**Previous Phase:** Phase 3 - Core EC2 Operations ✓ **COMPLETE**
 
 **Phase 1 Plans:**
 | Plan | Status | Key Deliverable |
@@ -48,25 +51,25 @@
 **Phase 3 Plans:**
 | Plan | Status | Key Deliverable |
 |------|--------|-----------------|
-| 03-01 | Planned | Deep Learning AMI mapping and create_instance implementation |
-| 03-02 | Planned | delete_instance and get_instance with state mapping |
+| 03-01 | ✓ Complete | Deep Learning AMI mapping and create_instance implementation |
+| 03-02 | ✓ Complete | delete_instance and get_instance with state mapping |
 
-**Status:** Phase 2 Complete - 100% (2/2 plans done), Phase 3 Planned
+**Status:** Phase 3 Complete - 100% (2/2 plans done)
 
-**Last activity:** 2026-01-31 - Created Phase 3 plans (03-01, 03-02)
+**Last activity:** 2026-01-31 - Completed 03-02-PLAN.md - delete_instance() and get_instance() with idempotent termination and AWS state mapping
 
 **Phase Progress:**
 ```
-Overall: [██████░░░░] 40% (2/6 phases complete, 0 in progress)
+Overall: [████████░░] 50% (3/6 phases complete, 0 in progress)
 Phase 1: [██████████] 100% (3/3 plans complete) ✓
 Phase 2: [██████████] 100% (2/2 plans complete) ✓
-Phase 3: [░░░░░░░░░░] 0% (Planned - Ready for execution)
-Phase 4: [░░░░░░░░░░] 0% (Not started)
+Phase 3: [██████████] 100% (2/2 plans complete) ✓
+Phase 4: [░░░░░░░░░░] 0% (Ready to start)
 Phase 5: [░░░░░░░░░░] 0% (Not started)
 Phase 6: [░░░░░░░░░░] 0% (Not started)
 ```
 
-**Current Focus:** Phase 3 - Core EC2 Operations (instance lifecycle management)
+**Current Focus:** Phase 4 - Instance Lifecycle Waiting (wait_for_started, wait_for_public_ip)
 
 ---
 
@@ -78,15 +81,16 @@ Phase 6: [░░░░░░░░░░] 0% (Not started)
 | Phases defined | 6 | 6 ✓ |
 | Success criteria defined | 27 | 27 ✓ |
 | Phase 1 complete | ✓ | ✓ |
+| Phase 2 complete | ✓ | ✓ |
+| Phase 3 complete | ✓ | ✓ |
 | AWSClient implemented | ✓ | ✓ |
 | Factory integration | ✓ | ✓ |
 | Test coverage | TBD | >80% |
-| AWS integration | In Progress | Complete |
-| Phase 2 started | ✓ | Complete |
-| Phase 2 complete | ✓ | Complete |
-| create_ssh_key implemented | ✓ | Complete |
-| delete_ssh_key implemented | ✓ | Complete |
-| SSH key tests complete | ✓ | Complete |
+| AWS integration | Core Complete | Complete |
+| create_instance implemented | ✓ | ✓ |
+| delete_instance implemented | ✓ | ✓ |
+| get_instance implemented | ✓ | ✓ |
+| EC2 lifecycle complete | ✓ | ✓ |
 
 ---
 
@@ -112,6 +116,12 @@ Phase 6: [░░░░░░░░░░] 0% (Not started)
 | AWS resource tagging | TagSpecifications with ManagedBy | → Implemented in 02-01 |
 | Idempotent deletion | InvalidKeyPair.NotFound treated as success | → Implemented in 02-02 |
 | AWS testing pattern | moto mock_aws with aiobotocore | → Established in 02-02 |
+| DLAMI mapping | Static with documented update process | → Implemented in 03-01 |
+| Network configuration | subnet_id -> NetworkInterfaces | → Implemented in 03-01 |
+| Tagging strategy | Base tags + custom labels | → Implemented in 03-01 |
+| Instance termination | Idempotent via terminate_instances | → Implemented in 03-02 |
+| State mapping | AWS states -> InstanceState enum | → Implemented in 03-02 |
+| Public IP extraction | NetworkInterfaces then PublicIpAddress | → Implemented in 03-02 |
 
 ### Risks & Mitigations
 
@@ -141,7 +151,7 @@ None currently.
 | Planning | Complete | 2026-01-31 | Roadmap created, 6 phases defined |
 | Phase 1 | **Complete** | 2026-01-31 | AWS Schema, AWSClient, Factory integration, Tests |
 | Phase 2 | **Complete** | 2026-01-31 | SSH key management: create, delete, comprehensive tests |
-| Phase 3 | Pending | - | Core EC2 operations |
+| Phase 3 | **Complete** | 2026-01-31 | Core EC2 operations: create, delete, get instance with state mapping |
 | Phase 4 | Pending | - | Instance waiting logic |
 | Phase 5 | Pending | - | EBS storage |
 | Phase 6 | Pending | - | Integration & testing |
@@ -150,25 +160,34 @@ None currently.
 
 ## Session Continuity
 
-**Last Action:** Completed 02-02-PLAN.md - delete_ssh_key implementation with idempotent deletion and 6 comprehensive unit tests
+**Last Action:** Completed 03-02-PLAN.md - delete_instance() and get_instance() implementations with:
+- Idempotent termination handling (InvalidInstanceID.NotFound, IncorrectState)
+- AWS state to InstanceState enum mapping
+- Public IP extraction from network interfaces
+- 9 comprehensive unit tests
 
 **Next Actions:**
-1. Execute `03-01-PLAN.md` - Create Deep Learning AMI mapping and implement create_instance()
-2. Execute `03-02-PLAN.md` - Implement delete_instance() and get_instance() with state mapping
-3. Phase 3 delivers full EC2 instance lifecycle (create, delete, get status)
+1. Execute `04-01-PLAN.md` - Implement wait_for_started() with polling
+2. Execute `04-02-PLAN.md` - Implement wait_for_public_ip() with polling
+3. Phase 4 delivers reliable instance readiness detection
 
 **Context for Next Session:**
 - Phase 1 Foundation complete ✓
 - Phase 2 SSH Key Management complete ✓
-  - create_ssh_key() with collision detection and AWS tagging ✓
-  - delete_ssh_key() with idempotent deletion ✓
-  - 6 comprehensive unit tests covering all scenarios ✓
-- Key naming pattern: `gpustack-{worker_name}-{8-char-hex-suffix}`
-- Testing pattern established: moto @mock_aws + async pytest
-- **Phase 3 Planned with 2 plans:**
-  - 03-01: Deep Learning AMI mapping + create_instance()
-  - 03-02: delete_instance() + get_instance() with state mapping
-- Next: Execute Phase 3 plans to enable EC2 instance lifecycle
+- Phase 3 Core EC2 Operations complete ✓
+  - create_instance() with DLAMI and tagging ✓
+  - delete_instance() with idempotent termination ✓
+  - get_instance() with state mapping and IP extraction ✓
+  - 15 total unit tests for EC2 operations ✓
+- Key patterns established:
+  - Idempotent operations (log warning, don't error on already-deleted)
+  - AWS error code checking before generic error handling
+  - State mapping via status_mapping dictionary
+  - Response parsing with .get() defaults for safety
+- **Next: Phase 4 - Instance Lifecycle Waiting**
+  - wait_for_started(): Poll until instance reaches RUNNING state
+  - wait_for_public_ip(): Poll until public IP is assigned
+  - Exponential backoff for AWS eventual consistency
 
 ---
 
