@@ -27,18 +27,18 @@
 
 **Active Phase:** Phase 1 - Foundation & Configuration (1 of 6)
 
-**Current Plan:** 01-01 (1 of 3 plans in phase) - AWS Schema Foundation ✓ Complete
+**Current Plan:** 01-02 (2 of 3 plans in phase) - AWS Client Foundation ✓ Complete
 
-**Next Plan:** 01-02 - AWS Client Foundation (aiobotocore setup)
+**Next Plan:** 01-03 - Factory Integration (enable AWS provider selection)
 
 **Status:** In progress
 
-**Last activity:** 2026-01-31 - Completed 01-01-PLAN.md (AWS Schema Foundation)
+**Last activity:** 2026-01-31 - Completed 01-02-PLAN.md (AWS Client Foundation)
 
 **Phase Progress:**
 ```
 Overall: [██░░░░░░░░] 16% (1/6 phases in progress)
-Phase 1: [██░░░░░░░░] 33% (1/3 plans complete)
+Phase 1: [████░░░░░░] 66% (2/3 plans complete)
 Phase 2: [░░░░░░░░░░] 0% (Not started)
 Phase 3: [░░░░░░░░░░] 0% (Not started)
 Phase 4: [░░░░░░░░░░] 0% (Not started)
@@ -60,6 +60,7 @@ Phase 6: [░░░░░░░░░░] 0% (Not started)
 | Test coverage | TBD | >80% |
 | AWS integration | In Progress | Complete |
 | Schema foundation | Complete | Complete ✓ |
+| AWSClient foundation | Complete | Complete ✓ |
 
 ---
 
@@ -76,13 +77,14 @@ Phase 6: [░░░░░░░░░░] 0% (Not started)
 | Access key format | AKIA/ASIA prefix + 16 alphanumeric | → Implemented in 01-01 |
 | Region format | lowercase-hyphen pattern | → Implemented in 01-01 |
 | Secret handling | SecretStr vs plain string | → SecretStr selected |
+| Retry policy | max_attempts=10 with adaptive mode | → Implemented in 01-02 |
 
 ### Risks & Mitigations
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| AWS eventual consistency | High | Exponential backoff in WAIT phase |
-| Rate limiting | Medium | Retry policy (10 attempts) configured |
+| AWS eventual consistency | High | Exponential backoff in WAIT phase (max_attempts=10 configured) |
+| Rate limiting | Medium | Retry policy (10 attempts) configured in AWSClient |
 | IAM permissions | High | Document minimum permissions, test with restricted role |
 | AMI compatibility | Medium | Validate GPU accessibility in Phase 3 |
 
@@ -103,7 +105,7 @@ None currently.
 | Phase | Status | Completed | Key Outcomes |
 |-------|--------|-----------|--------------|
 | Planning | Complete | 2026-01-31 | Roadmap created, 6 phases defined |
-| Phase 1 | In Progress | - | 01-01: AWS Schema Foundation complete |
+| Phase 1 | In Progress | - | 01-01: AWS Schema Foundation complete, 01-02: AWSClient complete |
 | Phase 2 | Pending | - | SSH key management |
 | Phase 3 | Pending | - | Core EC2 operations |
 | Phase 4 | Pending | - | Instance waiting logic |
@@ -114,17 +116,18 @@ None currently.
 
 ## Session Continuity
 
-**Last Action:** Completed 01-01-PLAN.md - AWS Schema Foundation
+**Last Action:** Completed 01-02-PLAN.md - AWS Client Foundation
 
 **Next Actions:**
-1. Execute `01-02-PLAN.md` - AWS Client Foundation (aiobotocore)
+1. Execute `01-03-PLAN.md` - Factory Integration (enable AWS provider selection)
 2. Continue with Phase 1 remaining plans
 
 **Context for Next Session:**
 - Schema foundation complete: ClusterProvider.AWS, AWSConfig, CloudCredential mapping
-- Files created: gpustack/schemas/aws.py
-- Files modified: gpustack/schemas/clusters.py
-- Type foundation ready for AWS client implementation
+- AWSClient complete: aiobotocore integration, retry config, exception handling
+- Files created: gpustack/schemas/aws.py, gpustack/cloud_providers/aws.py
+- Files modified: gpustack/schemas/clusters.py, pyproject.toml
+- Type foundation ready for factory integration
 
 ---
 
