@@ -640,3 +640,239 @@ async def test_instance_lifecycle(aws_client):
 
     # Clean up SSH key
     await aws_client.delete_ssh_key(key_name)
+
+
+# wait_for_started() Tests
+
+
+@pytest.mark.asyncio
+async def test_wait_for_started_success():
+    """Test wait_for_started returns instance when it reaches RUNNING state."""
+    from unittest.mock import AsyncMock, patch
+    from gpustack.cloud_providers.abstract import CloudInstance, InstanceState
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    # Mock get_instance to return RUNNING on first call
+    mock_instance = CloudInstance(
+        external_id="i-test123",
+        name="test-worker",
+        image="ami-test",
+        type="g4dn.xlarge",
+        region="us-east-1",
+        ssh_key_id="key-123",
+        status=InstanceState.RUNNING,
+    )
+
+    with patch.object(
+        client, "get_instance", new=AsyncMock(return_value=mock_instance)
+    ) as mock_get:
+        instance = await client.wait_for_started("i-test123", backoff=0.1, limit=5)
+
+        assert instance is not None
+        assert instance.external_id == "i-test123"
+        assert instance.status.value == "running"
+        assert mock_get.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_wait_for_started_already_running():
+    """Test wait_for_started returns immediately if instance already running."""
+    from unittest.mock import AsyncMock, patch
+    from gpustack.cloud_providers.abstract import CloudInstance, InstanceState
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    mock_instance = CloudInstance(
+        external_id="i-test123",
+        name="already-running-worker",
+        image="ami-test",
+        type="g4dn.xlarge",
+        region="us-east-1",
+        ssh_key_id="key-123",
+        status=InstanceState.RUNNING,
+    )
+
+    with patch.object(
+        client, "get_instance", new=AsyncMock(return_value=mock_instance)
+    ) as mock_get:
+        instance = await client.wait_for_started("i-test123", backoff=0.1, limit=5)
+
+        # Should return immediately (only called once)
+        assert instance is not None
+        assert instance.status.value == "running"
+        assert mock_get.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_wait_for_started_timeout():
+    """Test wait_for_started raises TimeoutError when limit exceeded."""
+    from unittest.mock import AsyncMock, patch
+    from gpustack.cloud_providers.abstract import CloudInstance, InstanceState
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    # Mock get_instance to always return PENDING state (never transitions)
+    mock_instance = CloudInstance(
+        external_id="i-test123",
+        name="timeout-worker",
+        image="ami-test",
+        type="g4dn.xlarge",
+        region="us-east-1",
+        ssh_key_id="key-123",
+        status=InstanceState.CREATED,  # PENDING/CREATED state
+    )
+
+    with patch.object(
+        client, "get_instance", new=AsyncMock(return_value=mock_instance)
+    ):
+        # Should raise TimeoutError after limit attempts
+        with pytest.raises(TimeoutError, match="did not reach running state"):
+            await client.wait_for_started("i-test123", backoff=0.01, limit=3)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_started_not_found_retry():
+    """Test wait_for_started retries when instance not yet visible (NotFound)."""
+    from unittest.mock import patch
+    from gpustack.cloud_providers.abstract import CloudInstance, InstanceState
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    # Mock get_instance to return None first, then RUNNING
+    call_count = [0]
+
+    async def mock_get_instance(external_id):
+        call_count[0] += 1
+        if call_count[0] <= 2:
+            return None  # Simulate NotFound / eventual consistency
+        return CloudInstance(
+            external_id=external_id,
+            name="retry-test",
+            image="ami-test",
+            type="g4dn.xlarge",
+            region="us-east-1",
+            ssh_key_id="key-123",
+            status=InstanceState.RUNNING,
+        )
+
+    with patch.object(client, "get_instance", side_effect=mock_get_instance):
+        instance = await client.wait_for_started("i-retry123", backoff=0.01, limit=5)
+
+    # Should have retried and eventually returned the running instance
+    assert instance is not None
+    assert instance.status.value == "running"
+    assert call_count[0] == 3  # 2 None responses + 1 RUNNING
+
+
+@pytest.mark.asyncio
+async def test_wait_for_started_exponential_backoff():
+    """Test that wait_for_started uses exponential backoff."""
+    from unittest.mock import AsyncMock, patch
+    import asyncio
+    from gpustack.cloud_providers.abstract import CloudInstance, InstanceState
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    # Mock instance always in PENDING state
+    mock_instance = CloudInstance(
+        external_id="i-test123",
+        name="backoff-test",
+        image="ami-test",
+        type="g4dn.xlarge",
+        region="us-east-1",
+        ssh_key_id="key-123",
+        status=InstanceState.CREATED,
+    )
+
+    # Track sleep calls
+    sleep_calls = []
+
+    async def mock_sleep(duration):
+        sleep_calls.append(duration)
+
+    with patch.object(
+        client, "get_instance", new=AsyncMock(return_value=mock_instance)
+    ):
+        with patch("asyncio.sleep", side_effect=mock_sleep):
+            try:
+                await client.wait_for_started("i-test123", backoff=1, limit=5)
+            except TimeoutError:
+                pass  # Expected
+
+    # Verify exponential backoff pattern
+    assert len(sleep_calls) == 5  # 5 attempts, 5 sleeps
+    assert sleep_calls[0] == 1  # backoff * 2^0 = 1
+    assert sleep_calls[1] == 2  # backoff * 2^1 = 2
+    assert sleep_calls[2] == 4  # backoff * 2^2 = 4
+    assert sleep_calls[3] == 8  # backoff * 2^3 = 8
+    assert sleep_calls[4] == 16  # backoff * 2^4 = 16
+
+
+@pytest.mark.asyncio
+async def test_wait_for_started_backoff_cap():
+    """Test that exponential backoff is capped at 60 seconds."""
+    from unittest.mock import AsyncMock, patch
+    import asyncio
+    from gpustack.cloud_providers.abstract import CloudInstance, InstanceState
+
+    client = AWSClient(
+        access_key="AKIAIOSFODNN7EXAMPLE",
+        secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        region="us-east-1",
+    )
+
+    mock_instance = CloudInstance(
+        external_id="i-test123",
+        name="cap-test",
+        image="ami-test",
+        type="g4dn.xlarge",
+        region="us-east-1",
+        ssh_key_id="key-123",
+        status=InstanceState.CREATED,
+    )
+
+    sleep_calls = []
+
+    async def mock_sleep(duration):
+        sleep_calls.append(duration)
+
+    # Use backoff=10, limit=7
+    # Expected: 10, 20, 40, 60, 60, 60, 60 (capped at 60)
+    with patch.object(
+        client, "get_instance", new=AsyncMock(return_value=mock_instance)
+    ):
+        with patch("asyncio.sleep", side_effect=mock_sleep):
+            try:
+                await client.wait_for_started("i-test123", backoff=10, limit=7)
+            except TimeoutError:
+                pass
+
+    # Verify cap at 60 seconds
+    assert sleep_calls[0] == 10  # 10 * 2^0
+    assert sleep_calls[1] == 20  # 10 * 2^1
+    assert sleep_calls[2] == 40  # 10 * 2^2
+    assert sleep_calls[3] == 60  # 10 * 2^3 = 80, but capped at 60
+    assert sleep_calls[4] == 60  # capped
+    assert sleep_calls[5] == 60  # capped
+    assert sleep_calls[6] == 60  # capped
