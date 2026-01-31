@@ -28,9 +28,9 @@
 
 ## Current Position
 
-**Active Phase:** Phase 2 - SSH Key Management (2 of 6)
+**Active Phase:** Phase 3 - Core EC2 Operations (Planned, ready for execution)
 
-**Previous Phase:** Phase 1 - Foundation & Configuration ✓ **COMPLETE**
+**Previous Phase:** Phase 2 - SSH Key Management ✓ **COMPLETE**
 
 **Phase 1 Plans:**
 | Plan | Status | Key Deliverable |
@@ -45,22 +45,28 @@
 | 02-01 | ✓ Complete | create_ssh_key with import_key_pair, collision detection, tagging |
 | 02-02 | ✓ Complete | delete_ssh_key with idempotent deletion, comprehensive unit tests |
 
-**Status:** Phase 2 Complete - 100% (2/2 plans done)
+**Phase 3 Plans:**
+| Plan | Status | Key Deliverable |
+|------|--------|-----------------|
+| 03-01 | Planned | Deep Learning AMI mapping and create_instance implementation |
+| 03-02 | Planned | delete_instance and get_instance with state mapping |
 
-**Last activity:** 2026-01-31 - Completed 02-02-PLAN.md (delete_ssh_key implementation and comprehensive tests)
+**Status:** Phase 2 Complete - 100% (2/2 plans done), Phase 3 Planned
+
+**Last activity:** 2026-01-31 - Created Phase 3 plans (03-01, 03-02)
 
 **Phase Progress:**
 ```
 Overall: [██████░░░░] 40% (2/6 phases complete, 0 in progress)
 Phase 1: [██████████] 100% (3/3 plans complete) ✓
 Phase 2: [██████████] 100% (2/2 plans complete) ✓
-Phase 3: [░░░░░░░░░░] 0% (Not started - Ready)
+Phase 3: [░░░░░░░░░░] 0% (Planned - Ready for execution)
 Phase 4: [░░░░░░░░░░] 0% (Not started)
 Phase 5: [░░░░░░░░░░] 0% (Not started)
 Phase 6: [░░░░░░░░░░] 0% (Not started)
 ```
 
-**Current Focus:** Ready for Phase 3 - Core EC2 Operations
+**Current Focus:** Phase 3 - Core EC2 Operations (instance lifecycle management)
 
 ---
 
@@ -147,9 +153,9 @@ None currently.
 **Last Action:** Completed 02-02-PLAN.md - delete_ssh_key implementation with idempotent deletion and 6 comprehensive unit tests
 
 **Next Actions:**
-1. Begin `03-01-PLAN.md` - Core EC2 operations (create_instance, delete_instance)
-2. Implement EC2 instance lifecycle methods
-3. Phase 3 will build on SSH key management for instance creation
+1. Execute `03-01-PLAN.md` - Create Deep Learning AMI mapping and implement create_instance()
+2. Execute `03-02-PLAN.md` - Implement delete_instance() and get_instance() with state mapping
+3. Phase 3 delivers full EC2 instance lifecycle (create, delete, get status)
 
 **Context for Next Session:**
 - Phase 1 Foundation complete ✓
@@ -159,7 +165,10 @@ None currently.
   - 6 comprehensive unit tests covering all scenarios ✓
 - Key naming pattern: `gpustack-{worker_name}-{8-char-hex-suffix}`
 - Testing pattern established: moto @mock_aws + async pytest
-- **Ready for Phase 3: Core EC2 Operations**
+- **Phase 3 Planned with 2 plans:**
+  - 03-01: Deep Learning AMI mapping + create_instance()
+  - 03-02: delete_instance() + get_instance() with state mapping
+- Next: Execute Phase 3 plans to enable EC2 instance lifecycle
 
 ---
 

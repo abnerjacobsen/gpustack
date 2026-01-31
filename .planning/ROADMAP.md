@@ -4,7 +4,7 @@
 
 **Depth:** Comprehensive (6 phases)
 **Created:** 2026-01-31
-**Status:** Draft - Awaiting Approval
+**Status:** Phase 3 Planned - Ready for Execution
 
 ---
 
@@ -106,6 +106,12 @@ Plans:
 3. Instance receives GPUStack worker bootstrap via cloud-init user data
 4. Instance has identifying tags (Name, GPUStack-managed, etc.)
 5. System can terminate an instance by ID and it stops running in AWS
+
+**Plans:** 2 plans in 1 wave
+
+Plans:
+- [ ] 03-01-PLAN.md — Deep Learning AMI mapping and create_instance implementation
+- [ ] 03-02-PLAN.md — delete_instance and get_instance with state mapping
 
 ---
 
