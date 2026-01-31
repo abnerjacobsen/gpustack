@@ -492,20 +492,50 @@ class AWSClient(ProviderClientBase):
     ) -> CloudInstance:
         """Wait for EC2 instance to receive public IP address.
 
+        Polls the instance using exponential backoff until a public IP is assigned.
+        Handles AWS eventual consistency by retrying when the instance is not yet
+        visible (InvalidInstanceID.NotFound).
+
         Args:
             external_id: AWS EC2 instance ID
-            backoff: Seconds between checks (default: 15)
+            backoff: Base seconds between checks (default: 15)
             limit: Maximum number of retry attempts (default: 20)
 
         Returns:
             CloudInstance with public IP assigned
 
         Raises:
-            TimeoutError: If public IP not assigned within limit
-            NotImplementedError: Full implementation in Phase 4
+            TimeoutError: If public IP not assigned within limit attempts
+            RuntimeError: If unexpected error occurs during polling
         """
-        raise NotImplementedError(
-            "wait_for_public_ip implementation pending Phase 4 (Wait Logic)"
+        for attempt in range(limit):
+            instance = await self.get_instance(external_id)
+
+            if instance is None:
+                # Instance not yet visible (AWS eventual consistency)
+                logger.debug(f"Instance {external_id} not yet visible, retrying...")
+            elif instance.ip_address is not None and instance.ip_address != "":
+                # Public IP is assigned
+                logger.info(
+                    f"Instance {external_id} received public IP {instance.ip_address} "
+                    f"after {attempt + 1} attempts"
+                )
+                return instance
+            else:
+                # Log current IP status for debugging
+                logger.debug(
+                    f"Waiting for public IP for instance {external_id}, "
+                    f"attempt {attempt + 1}/{limit}, IP: {instance.ip_address}"
+                )
+
+            # Calculate exponential backoff, capped at 60 seconds
+            sleep_time = min(backoff * (2**attempt), 60)
+            await asyncio.sleep(sleep_time)
+
+        # Exceeded limit without IP being assigned
+        raise TimeoutError(
+            f"EC2 instance {external_id} did not receive a public IP "
+            f"within {limit} attempts ({backoff}s base backoff with exponential increase)"
         )
 
     async def create_ssh_key(self, worker_name: str, public_key: str) -> str:
