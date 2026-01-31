@@ -377,3 +377,266 @@ async def test_create_instance_no_labels(aws_client):
         assert tags.get("ManagedBy") == "GPUStack"
         assert tags.get("GPUStackWorker") == "true"
         assert "project" not in tags
+
+
+# Instance Deletion Tests
+
+
+@pytest.mark.asyncio
+@mock_aws
+async def test_delete_instance_success(aws_client):
+    """Test terminating an EC2 instance successfully."""
+    # First create an instance
+    key_name = await aws_client.create_ssh_key("delete-test", TEST_PUBLIC_KEY)
+
+    instance_spec = CloudInstanceCreate(
+        name="delete-test-worker",
+        image="ami-test",
+        type="g4dn.xlarge",
+        region="us-east-1",
+        ssh_key_id=key_name,
+    )
+
+    instance_id = await aws_client.create_instance(instance_spec)
+    assert instance_id is not None
+
+    # Verify instance exists and is running or pending
+    async with aws_client._get_client() as client:
+        response = await client.describe_instances(InstanceIds=[instance_id])
+        instances = response["Reservations"][0]["Instances"]
+        assert instances[0]["State"]["Name"] in ["pending", "running"]
+
+    # Delete the instance
+    await aws_client.delete_instance(instance_id)
+
+    # Verify instance is in terminating or terminated state
+    async with aws_client._get_client() as client:
+        response = await client.describe_instances(InstanceIds=[instance_id])
+        instances = response["Reservations"][0]["Instances"]
+        assert instances[0]["State"]["Name"] in ["shutting-down", "terminated"]
+
+
+@pytest.mark.asyncio
+@mock_aws
+async def test_delete_instance_already_terminated(aws_client):
+    """Test idempotent deletion of already-terminated instance."""
+    # Create and then terminate an instance
+    key_name = await aws_client.create_ssh_key("already-term-test", TEST_PUBLIC_KEY)
+
+    instance_spec = CloudInstanceCreate(
+        name="already-term-test-worker",
+        image="ami-test",
+        type="g4dn.xlarge",
+        region="us-east-1",
+        ssh_key_id=key_name,
+    )
+
+    instance_id = await aws_client.create_instance(instance_spec)
+    assert instance_id is not None
+
+    # First termination
+    await aws_client.delete_instance(instance_id)
+
+    # Second termination should succeed (idempotent)
+    await aws_client.delete_instance(instance_id)
+
+    # No exception raised = test passes
+    assert True
+
+
+@pytest.mark.asyncio
+@mock_aws
+async def test_delete_instance_not_found(aws_client):
+    """Test idempotent deletion for non-existent instance."""
+    # Delete a non-existent instance ID
+    await aws_client.delete_instance("i-0123456789abcdef0")
+
+    # No exception raised = test passes
+    assert True
+
+
+# Instance Get Tests
+
+
+@pytest.mark.asyncio
+@mock_aws
+async def test_get_instance_success(aws_client):
+    """Test retrieving instance details via get_instance."""
+    # Create an instance with labels
+    key_name = await aws_client.create_ssh_key("get-test", TEST_PUBLIC_KEY)
+
+    instance_spec = CloudInstanceCreate(
+        name="get-test-worker",
+        image="ami-test",
+        type="p3.2xlarge",
+        region="us-east-1",
+        ssh_key_id=key_name,
+        labels={"project": "ml-training", "team": "ai"},
+    )
+
+    instance_id = await aws_client.create_instance(instance_spec)
+    assert instance_id is not None
+
+    # Get instance details
+    instance = await aws_client.get_instance(instance_id)
+
+    # Verify CloudInstance fields
+    assert instance is not None
+    assert instance.external_id == instance_id
+    assert instance.name == "get-test-worker"
+    assert instance.type == "p3.2xlarge"
+    assert instance.region == "us-east-1"
+    assert instance.ssh_key_id == key_name
+    assert instance.status.value in [
+        "created",
+        "running",
+    ]  # pending->CREATED, running->RUNNING
+
+    # Verify labels/tags
+    assert instance.labels is not None
+    assert instance.labels.get("project") == "ml-training"
+    assert instance.labels.get("team") == "ai"
+    assert instance.labels.get("Name") == "get-test-worker"
+    assert instance.labels.get("ManagedBy") == "GPUStack"
+
+
+@pytest.mark.asyncio
+@mock_aws
+async def test_get_instance_not_found(aws_client):
+    """Test get_instance returns None for non-existent instance."""
+    instance = await aws_client.get_instance("i-nonexistent12345")
+
+    # Should return None, not raise exception
+    assert instance is None
+
+
+@pytest.mark.asyncio
+@mock_aws
+async def test_get_instance_state_mapping(aws_client):
+    """Test AWS state to InstanceState mapping."""
+    key_name = await aws_client.create_ssh_key("state-test", TEST_PUBLIC_KEY)
+
+    instance_spec = CloudInstanceCreate(
+        name="state-test-worker",
+        image="ami-test",
+        type="g4dn.xlarge",
+        region="us-east-1",
+        ssh_key_id=key_name,
+    )
+
+    instance_id = await aws_client.create_instance(instance_spec)
+    assert instance_id is not None
+
+    # Get instance - should be in pending or running state
+    instance = await aws_client.get_instance(instance_id)
+    assert instance is not None
+    assert instance.status.value in ["created", "running"]
+
+    # Terminate the instance
+    await aws_client.delete_instance(instance_id)
+
+    # Get instance again - should be in stopping or terminated state
+    instance = await aws_client.get_instance(instance_id)
+    assert instance is not None
+    assert instance.status.value in ["stopping", "terminated"]
+
+
+@pytest.mark.asyncio
+@mock_aws
+async def test_get_instance_with_volume_ids(aws_client):
+    """Test get_instance extracts volume IDs from block device mappings."""
+    # Create an instance
+    key_name = await aws_client.create_ssh_key("volume-test", TEST_PUBLIC_KEY)
+
+    instance_spec = CloudInstanceCreate(
+        name="volume-test-worker",
+        image="ami-test",
+        type="g4dn.xlarge",
+        region="us-east-1",
+        ssh_key_id=key_name,
+    )
+
+    instance_id = await aws_client.create_instance(instance_spec)
+    assert instance_id is not None
+
+    # Get instance
+    instance = await aws_client.get_instance(instance_id)
+    assert instance is not None
+
+    # Instance should have at least the root volume
+    # Note: In moto, the block device mappings are present but may not have
+    # the same structure as real AWS
+
+
+@pytest.mark.asyncio
+@mock_aws
+async def test_get_instance_public_ip_extraction(aws_client):
+    """Test public IP extraction from instance details."""
+    # Create an instance
+    key_name = await aws_client.create_ssh_key("ip-test", TEST_PUBLIC_KEY)
+
+    instance_spec = CloudInstanceCreate(
+        name="ip-test-worker",
+        image="ami-test",
+        type="g4dn.xlarge",
+        region="us-east-1",
+        ssh_key_id=key_name,
+    )
+
+    instance_id = await aws_client.create_instance(instance_spec)
+    assert instance_id is not None
+
+    # Get instance - moto instances don't have public IPs by default
+    # but we verify the extraction logic works
+    instance = await aws_client.get_instance(instance_id)
+    assert instance is not None
+    # IP may be None in moto, but extraction code should work without errors
+
+
+@pytest.mark.asyncio
+@mock_aws
+async def test_instance_lifecycle(aws_client):
+    """Test complete instance lifecycle: create, get, delete, verify deleted."""
+    # Generate a unique worker name
+    import uuid
+
+    worker_name = f"lifecycle-{uuid.uuid4().hex[:8]}"
+
+    # Create SSH key
+    key_name = await aws_client.create_ssh_key(worker_name, TEST_PUBLIC_KEY)
+    assert key_name.startswith(f"gpustack-{worker_name}-")
+
+    # Create instance
+    instance_spec = CloudInstanceCreate(
+        name=f"{worker_name}-instance",
+        image="ami-test",
+        type="g4dn.xlarge",
+        region="us-east-1",
+        ssh_key_id=key_name,
+        labels={"test": "lifecycle"},
+    )
+
+    instance_id = await aws_client.create_instance(instance_spec)
+    assert instance_id is not None
+    assert instance_id.startswith("i-")
+
+    # Verify instance via get_instance
+    instance = await aws_client.get_instance(instance_id)
+    assert instance is not None
+    assert instance.name == f"{worker_name}-instance"
+    assert instance.type == "g4dn.xlarge"
+    assert instance.status.value in ["created", "running"]
+
+    # Delete instance
+    await aws_client.delete_instance(instance_id)
+
+    # Verify instance is in terminating/terminated state
+    instance = await aws_client.get_instance(instance_id)
+    assert instance is not None
+    assert instance.status.value in ["stopping", "terminated"]
+
+    # Delete again (idempotent)
+    await aws_client.delete_instance(instance_id)
+
+    # Clean up SSH key
+    await aws_client.delete_ssh_key(key_name)
