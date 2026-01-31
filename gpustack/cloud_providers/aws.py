@@ -627,26 +627,330 @@ class AWSClient(ProviderClientBase):
                     return
                 raise self._handle_aws_error(e, "SSH key deletion")
 
+    async def _get_instance_az(self, client, instance_id: str) -> str:
+        """Get the Availability Zone of an EC2 instance.
+
+        Args:
+            client: aiobotocore EC2 client
+            instance_id: AWS EC2 instance ID
+
+        Returns:
+            Availability Zone string (e.g., "us-east-1a")
+
+        Raises:
+            RuntimeError: If instance not found or AZ cannot be determined
+        """
+        try:
+            response = await client.describe_instances(InstanceIds=[instance_id])
+            reservations = response.get("Reservations", [])
+            if not reservations:
+                raise RuntimeError(f"Instance {instance_id} not found")
+
+            instances = reservations[0].get("Instances", [])
+            if not instances:
+                raise RuntimeError(f"Instance {instance_id} not found in response")
+
+            instance = instances[0]
+            state = instance.get("State", {}).get("Name", "unknown")
+
+            # Instance must be running or stopped to attach volumes
+            if state not in ["running", "stopped", "pending", "stopping"]:
+                raise RuntimeError(
+                    f"Instance {instance_id} is in '{state}' state. "
+                    "Volumes can only be attached to running or stopped instances."
+                )
+
+            az = instance.get("Placement", {}).get("AvailabilityZone")
+            if not az:
+                raise RuntimeError(
+                    f"Could not determine Availability Zone for instance {instance_id}"
+                )
+
+            return az
+
+        except ClientError as e:
+            error_code = e.response["Error"]["Code"]
+            if error_code == "InvalidInstanceID.NotFound":
+                raise RuntimeError(f"Instance {instance_id} not found in AWS") from e
+            raise self._handle_aws_error(e, f"getting AZ for instance {instance_id}")
+
+    async def _create_volume(
+        self,
+        client,
+        az: str,
+        worker_id: int,
+        idx: int,
+        volume: Volume,
+    ) -> str:
+        """Create an EBS volume with proper tagging and wait for it to be available.
+
+        Args:
+            client: aiobotocore EC2 client
+            az: Availability Zone (must match instance AZ)
+            worker_id: Internal worker ID for naming
+            idx: Volume index for naming and device assignment
+            volume: Volume specification
+
+        Returns:
+            AWS EBS volume ID
+
+        Raises:
+            RuntimeError: If volume creation fails
+        """
+        # Generate volume name
+        if volume.name:
+            vol_name = f"{volume.name}-{worker_id}"
+        else:
+            vol_name = f"gpustack-vol-{worker_id}-{idx}"
+
+        # Build tags
+        tags = [
+            {"Key": "Name", "Value": vol_name},
+            {"Key": "ManagedBy", "Value": "GPUStack"},
+            {"Key": "WorkerId", "Value": str(worker_id)},
+            {"Key": "VolumeIndex", "Value": str(idx)},
+            {"Key": "Format", "Value": volume.format},
+        ]
+
+        try:
+            logger.info(f"Creating EBS volume {vol_name} ({volume.size_gb}GB) in {az}")
+
+            response = await client.create_volume(
+                AvailabilityZone=az,
+                Size=volume.size_gb,
+                VolumeType="gp3",
+                Encrypted=True,
+                TagSpecifications=[{"ResourceType": "volume", "Tags": tags}],
+            )
+
+            volume_id = response.get("VolumeId")
+            if not volume_id:
+                raise RuntimeError("Volume created but no VolumeId returned")
+
+            logger.info(
+                f"Created EBS volume {volume_id} ({volume.size_gb}GB) in {az}, "
+                f"waiting for available state"
+            )
+
+            # Wait for volume to be available
+            waiter = client.get_waiter("volume_available")
+            await waiter.wait(VolumeIds=[volume_id])
+
+            logger.info(f"EBS volume {volume_id} is now available")
+            return volume_id
+
+        except ClientError as e:
+            error_code = e.response["Error"]["Code"]
+            error_msg = e.response["Error"]["Message"]
+
+            if error_code == "InvalidVolume.ZoneMismatch":
+                raise RuntimeError(
+                    f"Volume AZ mismatch: {error_msg}. "
+                    "Volumes must be created in the same AZ as the instance."
+                ) from e
+            elif error_code == "VolumeLimitExceeded":
+                raise RuntimeError(
+                    f"EBS volume limit exceeded: {error_msg}. "
+                    "Please request a limit increase from AWS."
+                ) from e
+
+            raise self._handle_aws_error(e, f"creating EBS volume {vol_name}")
+
+    async def _attach_volume(
+        self,
+        client,
+        volume_id: str,
+        instance_id: str,
+        idx: int,
+    ) -> None:
+        """Attach an EBS volume to an EC2 instance.
+
+        Args:
+            client: aiobotocore EC2 client
+            volume_id: AWS EBS volume ID
+            instance_id: AWS EC2 instance ID
+            idx: Volume index for device naming (0=/dev/sdf, 1=/dev/sdg, etc.)
+
+        Raises:
+            RuntimeError: If attachment fails
+
+        Note:
+            Device names use /dev/sd[f-p] pattern (up to 11 additional volumes)
+        """
+        # Generate device name: /dev/sdf for idx=0, /dev/sdg for idx=1, etc.
+        # Maximum 11 additional volumes supported (/dev/sdf to /dev/sdp)
+        if idx < 0 or idx > 10:
+            raise ValueError(
+                f"Volume index {idx} exceeds maximum of 10 "
+                "(only 11 additional volumes supported per instance)"
+            )
+
+        device = f"/dev/sd{chr(ord('f') + idx)}"
+
+        try:
+            logger.info(
+                f"Attaching volume {volume_id} to instance {instance_id} at {device}"
+            )
+
+            await client.attach_volume(
+                VolumeId=volume_id,
+                InstanceId=instance_id,
+                Device=device,
+            )
+
+            # Wait for volume to be in-use
+            waiter = client.get_waiter("volume_in_use")
+            await waiter.wait(VolumeIds=[volume_id])
+
+            logger.info(
+                f"Successfully attached volume {volume_id} to instance {instance_id} at {device}"
+            )
+
+        except ClientError as e:
+            error_code = e.response["Error"]["Code"]
+            error_msg = e.response["Error"]["Message"]
+
+            if error_code == "AttachmentLimitExceeded":
+                raise RuntimeError(
+                    f"Volume attachment limit exceeded: {error_msg}. "
+                    "EC2 instances have a limit on attached volumes."
+                ) from e
+            elif error_code == "InvalidParameterValue":
+                raise RuntimeError(
+                    f"Invalid parameter for volume attachment: {error_msg}"
+                ) from e
+            elif error_code == "IncorrectState":
+                raise RuntimeError(
+                    f"Volume or instance in incorrect state: {error_msg}. "
+                    "Instance may be terminated or volume may be in use elsewhere."
+                ) from e
+
+            raise self._handle_aws_error(
+                e, f"attaching volume {volume_id} to instance {instance_id}"
+            )
+
+    async def _delete_volume(self, client, volume_id: str) -> None:
+        """Delete an EBS volume (cleanup helper).
+
+        Args:
+            client: aiobotocore EC2 client
+            volume_id: AWS EBS volume ID to delete
+
+        Note:
+            This method logs warnings on failure but does not raise exceptions,
+            as it's typically used for cleanup during error handling.
+        """
+        try:
+            logger.info(f"Deleting EBS volume {volume_id}")
+            await client.delete_volume(VolumeId=volume_id)
+            logger.info(f"Successfully deleted EBS volume {volume_id}")
+        except ClientError as e:
+            error_code = e.response["Error"]["Code"]
+            error_msg = e.response["Error"]["Message"]
+            logger.warning(
+                f"Failed to delete volume {volume_id} during cleanup: "
+                f"{error_code} - {error_msg}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"Unexpected error deleting volume {volume_id} during cleanup: {e}"
+            )
+
     async def create_volumes_and_attach(
         self, worker_id: int, external_id: str, region: str, *volumes: Volume
     ) -> List[str]:
         """Create EBS volumes and attach to EC2 instance.
 
+        Creates EBS volumes in the same Availability Zone as the instance,
+        waits for them to be available, attaches them with proper device naming,
+        and waits for attachment to complete.
+
         Args:
-            worker_id: Internal worker ID for naming
+            worker_id: Internal worker ID for naming and tagging
             external_id: AWS EC2 instance ID
             region: AWS region
-            volumes: Volume specifications
+            volumes: Volume specifications (size_gb, format, optional name)
 
         Returns:
             List of AWS EBS volume IDs
 
         Raises:
-            NotImplementedError: Full implementation in Phase 5
+            ValueError: If volume specifications are invalid
+            RuntimeError: If volume creation or attachment fails
+
+        Example:
+            >>> volumes = [
+            ...     Volume(size_gb=100, format="ext4", name="data"),
+            ...     Volume(size_gb=500, format="xfs", name="models"),
+            ... ]
+            >>> vol_ids = await client.create_volumes_and_attach(
+            ...     worker_id=1,
+            ...     external_id="i-0abcd1234efgh5678i",
+            ...     region="us-east-1",
+            ...     *volumes
+            ... )
+            >>> print(vol_ids)
+            ['vol-0123456789abcdef0', 'vol-0987654321fedcba0']
         """
-        raise NotImplementedError(
-            "create_volumes_and_attach implementation pending Phase 5 (Storage)"
+        # Return early if no volumes
+        if not volumes:
+            return []
+
+        volume_ids = []
+        created_volumes = []  # Track for cleanup on failure
+
+        async with self._get_client() as client:
+            # Step 1: Get the instance's Availability Zone
+            az = await self._get_instance_az(client, external_id)
+            logger.info(f"Instance {external_id} is in AZ {az}, creating volumes there")
+
+            # Step 2: Validate all volumes first
+            for idx, volume in enumerate(volumes):
+                # Validate size_gb
+                if volume.size_gb is None or volume.size_gb <= 0:
+                    raise ValueError(
+                        f"Volume #{idx} missing or invalid 'size_gb': {volume}"
+                    )
+
+                # Validate format
+                if volume.format is None or volume.format not in ["ext4", "xfs"]:
+                    raise ValueError(
+                        f"Volume #{idx} has invalid 'format': {volume.format}. "
+                        f"Must be 'ext4' or 'xfs'"
+                    )
+
+            # Step 3: Create and attach volumes
+            for idx, volume in enumerate(volumes):
+                vol_id = None
+                try:
+                    # Create volume
+                    vol_id = await self._create_volume(
+                        client, az, worker_id, idx, volume
+                    )
+                    created_volumes.append(vol_id)
+
+                    # Attach volume
+                    await self._attach_volume(client, vol_id, external_id, idx)
+                    volume_ids.append(vol_id)
+
+                except Exception:
+                    # Cleanup: delete any volumes we created but failed to attach
+                    if vol_id:
+                        await self._delete_volume(client, vol_id)
+                        # Remove from created_volumes since we deleted it
+                        if vol_id in created_volumes:
+                            created_volumes.remove(vol_id)
+
+                    # Also cleanup any previously created volumes
+                    for cleanup_vol_id in created_volumes:
+                        await self._delete_volume(client, cleanup_vol_id)
+
+                    raise
+
+        logger.info(
+            f"Successfully created and attached {len(volume_ids)} volumes to instance {external_id}"
         )
+        return volume_ids
 
     async def construct_user_data(
         self,
