@@ -31,7 +31,7 @@
 
 ## Current Position
 
-**Active Phase:** Phase 4 - Instance Lifecycle Waiting (Ready to start)
+**Active Phase:** Phase 4 - Instance Lifecycle Waiting (Planned - Ready to Execute)
 
 **Previous Phase:** Phase 3 - Core EC2 Operations ✓ **COMPLETE**
 
@@ -54,22 +54,28 @@
 | 03-01 | ✓ Complete | Deep Learning AMI mapping and create_instance implementation |
 | 03-02 | ✓ Complete | delete_instance and get_instance with state mapping |
 
-**Status:** Phase 3 Complete - 100% (2/2 plans done)
+**Phase 4 Plans:**
+| Plan | Status | Key Deliverable |
+|------|--------|-----------------|
+| 04-01 | Planned | wait_for_started() with exponential backoff and retry |
+| 04-02 | Planned | wait_for_public_ip() with exponential backoff and tests |
 
-**Last activity:** 2026-01-31 - Completed 03-02-PLAN.md - delete_instance() and get_instance() with idempotent termination and AWS state mapping
+**Status:** Phase 4 Planned - Ready for Execution
+
+**Last activity:** 2026-01-31 - Created 04-01-PLAN.md and 04-02-PLAN.md for Instance Lifecycle Waiting
 
 **Phase Progress:**
 ```
-Overall: [████████░░] 50% (3/6 phases complete, 0 in progress)
+Overall: [████████░░] 50% (3/6 phases complete, 1 planned)
 Phase 1: [██████████] 100% (3/3 plans complete) ✓
 Phase 2: [██████████] 100% (2/2 plans complete) ✓
 Phase 3: [██████████] 100% (2/2 plans complete) ✓
-Phase 4: [░░░░░░░░░░] 0% (Ready to start)
+Phase 4: [░░░░░░░░░░] 0% (Planned - 2 plans ready)
 Phase 5: [░░░░░░░░░░] 0% (Not started)
 Phase 6: [░░░░░░░░░░] 0% (Not started)
 ```
 
-**Current Focus:** Phase 4 - Instance Lifecycle Waiting (wait_for_started, wait_for_public_ip)
+**Current Focus:** Phase 4 - Instance Lifecycle Waiting (Ready to execute)
 
 ---
 
