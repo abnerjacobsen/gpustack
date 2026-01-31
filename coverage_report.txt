@@ -1,0 +1,31 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.4, pytest-8.4.2, pluggy-1.6.0
+rootdir: /home/abner/Devel/abnerjacobsen/testes/gpustack
+configfile: pytest.ini
+plugins: cov-7.0.0, asyncio-1.2.0, anyio-4.11.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 58 items
+
+tests/cloud_providers/test_aws.py ss..sssssssssssssssssssss............. [ 65%]
+....................                                                     [100%]
+
+=============================== warnings summary ===============================
+gpustack/schemas/common.py:11
+  /home/abner/Devel/abnerjacobsen/testes/gpustack/gpustack/schemas/common.py:11: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    from gpustack.api.exceptions import InvalidException
+
+../../../../.pyenv/versions/3.12.4/lib/python3.12/site-packages/google/protobuf/internal/well_known_types.py:92
+  /home/abner/.pyenv/versions/3.12.4/lib/python3.12/site-packages/google/protobuf/internal/well_known_types.py:92: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    _EPOCH_DATETIME = datetime.utcfromtimestamp(0)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================================ tests coverage ================================
+_______________ coverage: platform linux, python 3.12.4-final-0 ________________
+
+Name                              Stmts   Miss  Cover   Missing
+---------------------------------------------------------------
+gpustack/cloud_providers/aws.py     324    172    47%   87, 110-123, 137-145, 160-173, 219-338, 350-367, 378-439, 559-606, 618-628, 647, 651, 658, 665, 675, 704, 728, 752, 818-828, 847-855, 978, 992, 1013
+---------------------------------------------------------------
+TOTAL                               324    172    47%
+Coverage HTML written to dir htmlcov/aws
+================== 35 passed, 23 skipped, 2 warnings in 1.45s ==================
