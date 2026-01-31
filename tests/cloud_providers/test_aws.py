@@ -1691,3 +1691,181 @@ async def test_create_volume_tagging():
     assert call_args.kwargs["Size"] == 100
     assert call_args.kwargs["VolumeType"] == "gp3"
     assert call_args.kwargs["Encrypted"] is True
+
+
+# Factory Integration Tests
+
+
+def test_get_client_from_provider_aws_success():
+    """Test successful AWSClient instantiation from CloudCredential via factory."""
+    from gpustack.cloud_providers.common import get_client_from_provider
+    from gpustack.schemas.clusters import CloudCredential, ClusterProvider
+
+    credential = CloudCredential(
+        name="test-aws-cred",
+        provider=ClusterProvider.AWS,
+        key="AKIAIOSFODNN7EXAMPLE",
+        secret="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        options={
+            "region": "us-west-2",
+            "vpc_id": "vpc-12345",
+            "subnet_id": "subnet-67890",
+            "security_group_id": "sg-11111",
+        },
+    )
+
+    result = get_client_from_provider(ClusterProvider.AWS, credential)
+
+    assert isinstance(result, AWSClient)
+    assert result.access_key == credential.key
+    assert result.secret_key == credential.secret
+    assert result.region == "us-west-2"
+    assert result.config is not None
+    assert result.config.vpc_id == "vpc-12345"
+    assert result.config.subnet_id == "subnet-67890"
+    assert result.config.security_group_id == "sg-11111"
+
+
+def test_get_client_from_provider_aws_default_region():
+    """Test factory uses default region when not specified in options."""
+    from gpustack.cloud_providers.common import get_client_from_provider
+    from gpustack.schemas.clusters import CloudCredential, ClusterProvider
+
+    credential = CloudCredential(
+        name="test-aws-default-region",
+        provider=ClusterProvider.AWS,
+        key="AKIAIOSFODNN7EXAMPLE",
+        secret="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        options={},
+    )
+
+    result = get_client_from_provider(ClusterProvider.AWS, credential)
+
+    assert isinstance(result, AWSClient)
+    assert result.region == "us-east-1"  # Default region
+
+
+def test_get_client_from_provider_aws_partial_options():
+    """Test factory with partial options - only region and subnet_id."""
+    from gpustack.cloud_providers.common import get_client_from_provider
+    from gpustack.schemas.clusters import CloudCredential, ClusterProvider
+
+    credential = CloudCredential(
+        name="test-aws-partial",
+        provider=ClusterProvider.AWS,
+        key="AKIAIOSFODNN7EXAMPLE",
+        secret="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        options={"region": "eu-west-1", "subnet_id": "subnet-test"},
+    )
+
+    result = get_client_from_provider(ClusterProvider.AWS, credential)
+
+    assert isinstance(result, AWSClient)
+    assert result.region == "eu-west-1"
+    assert result.config is not None
+    assert result.config.subnet_id == "subnet-test"
+    assert result.config.vpc_id is None
+    assert result.config.security_group_id is None
+
+
+def test_get_client_from_provider_aws_no_options():
+    """Test factory when credential has no options (None)."""
+    from gpustack.cloud_providers.common import get_client_from_provider
+    from gpustack.schemas.clusters import CloudCredential, ClusterProvider
+
+    credential = CloudCredential(
+        name="test-aws-no-options",
+        provider=ClusterProvider.AWS,
+        key="AKIAIOSFODNN7EXAMPLE",
+        secret="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        options=None,
+    )
+
+    result = get_client_from_provider(ClusterProvider.AWS, credential)
+
+    assert isinstance(result, AWSClient)
+    assert result.region == "us-east-1"  # Default when options is None
+    assert result.config is None  # No config when options is None
+
+
+def test_get_client_from_provider_unsupported_provider():
+    """Test factory raises ValueError for unsupported provider."""
+    from gpustack.cloud_providers.common import get_client_from_provider
+    from gpustack.schemas.clusters import CloudCredential, ClusterProvider
+
+    # Create a CloudCredential with Docker provider (not in factory)
+    credential = CloudCredential(
+        name="test-docker-cred",
+        provider=ClusterProvider.Docker,
+        key=None,
+        secret=None,
+        options=None,
+    )
+
+    with pytest.raises(ValueError, match="Unsupported provider"):
+        get_client_from_provider(ClusterProvider.Docker, credential)
+
+
+def test_factory_lambda_empty_strings():
+    """Test factory validates empty key/secret through AWSConfig."""
+    from gpustack.cloud_providers.common import get_client_from_provider
+    from gpustack.schemas.clusters import CloudCredential, ClusterProvider
+    from pydantic import ValidationError
+
+    credential = CloudCredential(
+        name="test-empty-strings",
+        provider=ClusterProvider.AWS,
+        key="",
+        secret="",
+        options={"region": "ap-northeast-1"},
+    )
+
+    # Factory creates AWSClient which validates through AWSConfig
+    # Empty access_key should raise ValidationError
+    with pytest.raises(ValidationError, match="Access key cannot be empty"):
+        get_client_from_provider(ClusterProvider.AWS, credential)
+
+
+def test_factory_lambda_special_characters_in_secret():
+    """Test factory correctly handles secrets with special characters."""
+    from gpustack.cloud_providers.common import get_client_from_provider
+    from gpustack.schemas.clusters import CloudCredential, ClusterProvider
+
+    # Secret with various special characters that AWS allows
+    special_secret = "wJalr/XU+tnFEMI=K7MDENG&bPxRfiCY*EXAMPLE!KEY123"
+
+    credential = CloudCredential(
+        name="test-special-chars",
+        provider=ClusterProvider.AWS,
+        key="AKIAIOSFODNN7EXAMPLE",
+        secret=special_secret,
+        options={"region": "us-east-2"},
+    )
+
+    result = get_client_from_provider(ClusterProvider.AWS, credential)
+
+    assert isinstance(result, AWSClient)
+    assert result.secret_key == special_secret
+    assert result.region == "us-east-2"
+
+
+def test_factory_lambda_long_region_name():
+    """Test factory validates region format through AWSConfig."""
+    from gpustack.cloud_providers.common import get_client_from_provider
+    from gpustack.schemas.clusters import CloudCredential, ClusterProvider
+    from pydantic import ValidationError
+
+    # Invalid region name - AWSConfig should validate and reject
+    long_region = "very-long-region-name-that-is-invalid"
+
+    credential = CloudCredential(
+        name="test-long-region",
+        provider=ClusterProvider.AWS,
+        key="AKIAIOSFODNN7EXAMPLE",
+        secret="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        options={"region": long_region},
+    )
+
+    # Factory creates AWSClient which validates region format through AWSConfig
+    with pytest.raises(ValidationError, match="Invalid AWS region"):
+        get_client_from_provider(ClusterProvider.AWS, credential)
