@@ -443,9 +443,13 @@ class AWSClient(ProviderClientBase):
     ) -> CloudInstance:
         """Wait for EC2 instance to reach running state.
 
+        Polls the instance status using exponential backoff until the instance
+        reaches the RUNNING state. Handles AWS eventual consistency by retrying
+        when the instance is not yet visible (InvalidInstanceID.NotFound).
+
         Args:
             external_id: AWS EC2 instance ID
-            backoff: Seconds between status checks (default: 15)
+            backoff: Base seconds between status checks (default: 15)
             limit: Maximum number of retry attempts (default: 40)
 
         Returns:
@@ -453,10 +457,34 @@ class AWSClient(ProviderClientBase):
 
         Raises:
             TimeoutError: If instance doesn't reach running state within limit
-            NotImplementedError: Full implementation in Phase 4
+            RuntimeError: If unexpected error occurs during polling
         """
-        raise NotImplementedError(
-            "wait_for_started implementation pending Phase 4 (Wait Logic)"
+        for attempt in range(limit):
+            instance = await self.get_instance(external_id)
+
+            if instance is None:
+                # Instance not yet visible (AWS eventual consistency)
+                logger.debug(f"Instance {external_id} not yet visible, retrying...")
+            elif instance.status == InstanceState.RUNNING:
+                logger.info(
+                    f"Instance {external_id} is now running after {attempt + 1} attempts"
+                )
+                return instance
+            else:
+                # Log current status for debugging
+                logger.debug(
+                    f"Waiting for instance {external_id}, attempt {attempt + 1}/{limit}, "
+                    f"status: {instance.status.value}"
+                )
+
+            # Calculate exponential backoff, capped at 60 seconds
+            sleep_time = min(backoff * (2**attempt), 60)
+            await asyncio.sleep(sleep_time)
+
+        # Exceeded limit without instance reaching RUNNING
+        raise TimeoutError(
+            f"EC2 instance {external_id} did not reach running state "
+            f"within {limit} attempts ({backoff}s base backoff with exponential increase)"
         )
 
     async def wait_for_public_ip(
