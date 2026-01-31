@@ -338,33 +338,105 @@ class AWSClient(ProviderClientBase):
                 raise RuntimeError(f"Failed to create EC2 instance: {str(e)}") from e
 
     async def delete_instance(self, external_id: str) -> None:
-        """Terminate an EC2 instance (stub for Phase 2 implementation).
+        """Terminate an EC2 instance by ID.
 
         Args:
             external_id: AWS EC2 instance ID (e.g., i-1234567890abcdef0)
 
-        Raises:
-            NotImplementedError: Full implementation in Phase 2
+        Note:
+            This method is idempotent - if the instance is already terminated
+            or does not exist, it logs a warning and returns successfully.
         """
-        raise NotImplementedError(
-            "delete_instance implementation pending Phase 2 (EC2 Operations)"
-        )
+        async with self._get_client() as client:
+            try:
+                await client.terminate_instances(InstanceIds=[external_id])
+                logger.info(f"Terminated EC2 instance {external_id}")
+            except ClientError as e:
+                error_code = e.response["Error"]["Code"]
+                if error_code == "InvalidInstanceID.NotFound":
+                    logger.warning(
+                        f"Instance {external_id} not found in AWS (already deleted or never existed)"
+                    )
+                    return
+                elif error_code == "IncorrectState":
+                    # Instance is already terminated or terminating
+                    logger.info(
+                        f"Instance {external_id} is already in terminated/terminating state"
+                    )
+                    return
+                raise self._handle_aws_error(e, "instance termination")
 
     async def get_instance(self, external_id: str) -> Optional[CloudInstance]:
-        """Get EC2 instance details (stub for Phase 2 implementation).
+        """Get EC2 instance details and status.
 
         Args:
             external_id: AWS EC2 instance ID
 
         Returns:
-            CloudInstance with current state, or None if not found
-
-        Raises:
-            NotImplementedError: Full implementation in Phase 2
+            CloudInstance with current state and details, or None if not found
         """
-        raise NotImplementedError(
-            "get_instance implementation pending Phase 2 (EC2 Operations)"
-        )
+        async with self._get_client() as client:
+            try:
+                response = await client.describe_instances(InstanceIds=[external_id])
+                reservations = response.get("Reservations", [])
+                if not reservations:
+                    return None
+
+                instances = reservations[0].get("Instances", [])
+                if not instances:
+                    return None
+
+                ec2_instance = instances[0]
+
+                # Extract public IP from network interfaces
+                public_ip = None
+                network_interfaces = ec2_instance.get("NetworkInterfaces", [])
+                for eni in network_interfaces:
+                    association = eni.get("Association", {})
+                    public_ip = association.get("PublicIp")
+                    if public_ip:
+                        break
+
+                # Alternative: check PublicIpAddress at instance level
+                if not public_ip:
+                    public_ip = ec2_instance.get("PublicIpAddress")
+
+                # Map AWS state to InstanceState
+                aws_state = ec2_instance.get("State", {}).get("Name", "unknown")
+                status = status_mapping.get(aws_state, InstanceState.UNKNOWN)
+
+                # Build tags dict from AWS tags
+                tags = {}
+                for tag in ec2_instance.get("Tags", []):
+                    tags[tag["Key"]] = tag["Value"]
+
+                # Get volume IDs from block device mappings
+                volume_ids = []
+                for bdm in ec2_instance.get("BlockDeviceMappings", []):
+                    ebs = bdm.get("Ebs", {})
+                    volume_id = ebs.get("VolumeId")
+                    if volume_id:
+                        volume_ids.append(volume_id)
+
+                return CloudInstance(
+                    external_id=ec2_instance.get("InstanceId"),
+                    name=tags.get("Name", ""),
+                    image=ec2_instance.get("ImageId", ""),
+                    type=ec2_instance.get("InstanceType", ""),
+                    region=self.region,
+                    ssh_key_id=ec2_instance.get("KeyName"),
+                    status=status,
+                    ip_address=public_ip,
+                    volume_ids=volume_ids if volume_ids else None,
+                    user_data=None,  # Not returned by describe_instances
+                    labels=tags,
+                )
+
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "InvalidInstanceID.NotFound":
+                    logger.debug(f"Instance {external_id} not found")
+                    return None
+                raise self._handle_aws_error(e, "instance describe")
 
     async def wait_for_started(
         self, external_id: str, backoff: int = 15, limit: int = 40
