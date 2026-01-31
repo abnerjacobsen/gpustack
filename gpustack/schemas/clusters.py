@@ -161,6 +161,16 @@ class ClusterProvider(Enum):
 class CloudCredentialBase(SQLModel):
     """
     Supports providers other than Kubernetes and Docker.
+
+    Provider-specific field mapping:
+    - DigitalOcean:
+        - key: API token (stored in 'key' field)
+        - secret: None (token is in key)
+        - options: None
+    - AWS:
+        - key: Access Key ID (e.g., AKIA...)
+        - secret: Secret Access Key (stored encrypted)
+        - options: Dict with vpc_id, subnet_id, security_group_id
     """
 
     name: str
