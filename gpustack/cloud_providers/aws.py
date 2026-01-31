@@ -120,6 +120,36 @@ class AWSClient(ProviderClientBase):
             logger.error(f"Unexpected error during {operation}: {error}")
             raise
 
+    async def validate_credentials(self) -> bool:
+        """Validate AWS credentials by calling EC2 describe_regions.
+
+        Uses a lightweight EC2 API call to verify credentials are valid
+        and can successfully authenticate to AWS. This is a read-only
+        operation that requires minimal IAM permissions.
+
+        Returns:
+            True if credentials are valid
+
+        Raises:
+            RuntimeError: If credentials are invalid or API call fails
+        """
+        try:
+            async with self._get_client() as client:
+                response = await client.describe_regions(RegionNames=[self.region])
+                if response.get("Regions"):
+                    logger.info(f"AWS credentials validated for region {self.region}")
+                    return True
+                raise RuntimeError(
+                    "AWS credentials validation failed: no regions returned"
+                )
+        except ClientError as e:
+            self._handle_aws_error(e, "credential validation")
+        except NoCredentialsError as e:
+            self._handle_aws_error(e, "credential validation")
+        except Exception as e:
+            logger.error(f"Unexpected error during credential validation: {e}")
+            raise RuntimeError(f"Failed to validate AWS credentials: {str(e)}") from e
+
     async def create_instance(self, instance: CloudInstanceCreate) -> Optional[str]:
         """Create an EC2 instance (stub for Phase 2 implementation).
 
