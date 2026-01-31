@@ -19,6 +19,7 @@ from .abstract import (
     CloudInstanceCreate,
     InstanceState,
 )
+from .aws_ami_mapping import get_ami_for_region
 from gpustack.schemas.clusters import Volume
 from gpustack.schemas.aws import AWSConfig
 
@@ -172,20 +173,169 @@ class AWSClient(ProviderClientBase):
             raise RuntimeError(f"Failed to validate AWS credentials: {str(e)}") from e
 
     async def create_instance(self, instance: CloudInstanceCreate) -> Optional[str]:
-        """Create an EC2 instance (stub for Phase 2 implementation).
+        """Create an EC2 GPU instance with Deep Learning AMI and GPUStack bootstrap.
+
+        Launches an EC2 instance with:
+        - Deep Learning AMI for the region (pre-installed NVIDIA drivers, CUDA)
+        - User data (cloud-init) for GPUStack worker bootstrap
+        - AWS tags for resource management (Name, ManagedBy, GPUStackWorker)
+        - Optional custom labels as additional tags
+        - Network configuration (subnet, security group) from AWSConfig
 
         Args:
             instance: CloudInstanceCreate with instance specifications
+                - name: Instance name (becomes Name tag)
+                - type: EC2 instance type (e.g., "p3.2xlarge", "g4dn.xlarge")
+                - region: AWS region (must be in DLAMI mapping)
+                - ssh_key_id: AWS key pair name from create_ssh_key
+                - user_data: Cloud-init script for worker bootstrap
+                - labels: Optional dict of custom tags
 
         Returns:
-            Instance ID as string, or None if creation failed
+            str: Instance ID (e.g., "i-1234567890abcdef0") on success
+            None: If creation failed (though typically raises RuntimeError)
 
         Raises:
-            NotImplementedError: Full implementation in Phase 2
+            RuntimeError: If AWS API call fails, including:
+                - InvalidAMIID.NotFound: AMI not available in region
+                - InsufficientInstanceCapacity: GPU instance unavailable
+                - VcpuLimitExceeded: Service quota exceeded
+                - Other AWS ClientError conditions
+
+        Example:
+            >>> instance_spec = CloudInstanceCreate(
+            ...     name="gpustack-worker-1",
+            ...     type="g4dn.xlarge",
+            ...     region="us-east-1",
+            ...     ssh_key_id="gpustack-worker-abc123",
+            ...     user_data=cloud_init_script,
+            ...     labels={"project": "ml-training", "team": "ai"}
+            ... )
+            >>> instance_id = await aws_client.create_instance(instance_spec)
+            >>> print(instance_id)
+            i-0abcd1234efgh5678i
         """
-        raise NotImplementedError(
-            "create_instance implementation pending Phase 2 (EC2 Operations)"
-        )
+        # Get AMI ID for the region (Deep Learning AMI with GPU support)
+        ami_id = get_ami_for_region(instance.region)
+
+        # Build base run_instances arguments
+        run_args = {
+            "ImageId": ami_id,
+            "InstanceType": instance.type,
+            "KeyName": instance.ssh_key_id,
+            "MinCount": 1,
+            "MaxCount": 1,
+            "UserData": instance.user_data if instance.user_data else "",
+        }
+
+        # Build tags for the instance
+        base_tags = [
+            {"Key": "Name", "Value": instance.name},
+            {"Key": "ManagedBy", "Value": "GPUStack"},
+            {"Key": "GPUStackWorker", "Value": "true"},
+        ]
+
+        # Add custom labels as tags if provided
+        if instance.labels:
+            for key, value in instance.labels.items():
+                base_tags.append({"Key": key, "Value": value})
+
+        run_args["TagSpecifications"] = [
+            {"ResourceType": "instance", "Tags": base_tags}
+        ]
+
+        # Configure network settings from AWSConfig if available
+        if self.config:
+            if self.config.subnet_id:
+                # Use NetworkInterfaces for subnet with public IP assignment
+                network_interface = {
+                    "SubnetId": self.config.subnet_id,
+                    "DeviceIndex": 0,
+                    "AssociatePublicIpAddress": True,
+                }
+
+                # Add security group if configured
+                if self.config.security_group_id:
+                    network_interface["Groups"] = [self.config.security_group_id]
+
+                run_args["NetworkInterfaces"] = [network_interface]
+            elif self.config.security_group_id:
+                # Security group without subnet (uses default VPC)
+                run_args["SecurityGroupIds"] = [self.config.security_group_id]
+
+        # Launch the EC2 instance
+        async with self._get_client() as client:
+            try:
+                response = await client.run_instances(**run_args)
+                instance_id = response["Instances"][0]["InstanceId"]
+                logger.info(
+                    f"Created EC2 instance {instance_id} of type {instance.type} "
+                    f"in region {instance.region}"
+                )
+                return instance_id
+
+            except ClientError as e:
+                error_code = e.response["Error"]["Code"]
+                error_msg = e.response["Error"]["Message"]
+
+                # Handle specific AWS error codes with user-friendly messages
+                if error_code == "InvalidAMIID.NotFound":
+                    logger.error(f"AMI {ami_id} not found in region {instance.region}")
+                    raise RuntimeError(
+                        f"Deep Learning AMI not available in region {instance.region}. "
+                        f"AMI ID {ami_id} not found. Please check the AMI mapping "
+                        f"or update aws_ami_mapping.py with valid AMI IDs."
+                    ) from e
+
+                elif error_code == "InsufficientInstanceCapacity":
+                    logger.error(
+                        f"GPU instance {instance.type} not available in region "
+                        f"{instance.region}: {error_msg}"
+                    )
+                    raise RuntimeError(
+                        f"GPU instance type {instance.type} is currently not "
+                        f"available in region {instance.region}. This is a temporary "
+                        f"capacity issue. Try again later or use a different "
+                        f"instance type or region."
+                    ) from e
+
+                elif error_code == "VcpuLimitExceeded":
+                    logger.error(
+                        f"vCPU limit exceeded for instance type {instance.type}"
+                    )
+                    raise RuntimeError(
+                        f"AWS vCPU service quota exceeded for instance type "
+                        f"{instance.type}. Please request a limit increase from "
+                        f"AWS Support or use a smaller instance type."
+                    ) from e
+
+                elif error_code == "InstanceLimitExceeded":
+                    logger.error(f"Instance limit exceeded in region {instance.region}")
+                    raise RuntimeError(
+                        f"AWS instance limit exceeded in region {instance.region}. "
+                        f"Please request a limit increase from AWS Support or "
+                        f"terminate unused instances."
+                    ) from e
+
+                elif error_code == "InvalidKeyPair.NotFound":
+                    logger.error(f"SSH key {instance.ssh_key_id} not found")
+                    raise RuntimeError(
+                        f"SSH key pair '{instance.ssh_key_id}' not found in AWS. "
+                        f"Please create the key pair first using create_ssh_key()."
+                    ) from e
+
+                else:
+                    # Generic AWS error
+                    logger.error(
+                        f"Failed to create EC2 instance: {error_code} - {error_msg}"
+                    )
+                    raise RuntimeError(
+                        f"Failed to create EC2 instance: {error_code} - {error_msg}"
+                    ) from e
+
+            except Exception as e:
+                logger.error(f"Unexpected error creating EC2 instance: {e}")
+                raise RuntimeError(f"Failed to create EC2 instance: {str(e)}") from e
 
     async def delete_instance(self, external_id: str) -> None:
         """Terminate an EC2 instance (stub for Phase 2 implementation).
