@@ -33,9 +33,9 @@
 
 ## Current Position
 
-**Active Phase:** Phase 4 - Instance Lifecycle Waiting ✓ **COMPLETE**
+**Active Phase:** Phase 5 - Storage Integration ✓ **IN PROGRESS**
 
-**Previous Phase:** Phase 3 - Core EC2 Operations ✓ **COMPLETE**
+**Previous Phase:** Phase 4 - Instance Lifecycle Waiting ✓ **COMPLETE**
 
 **Phase 1 Plans:**
 | Plan | Status | Key Deliverable |
@@ -62,22 +62,28 @@
 | 04-01 | ✓ **Complete** | wait_for_started() with exponential backoff and retry |
 | 04-02 | ✓ **Complete** | wait_for_public_ip() with exponential backoff and tests |
 
-**Status:** Phase 4 Complete - Both wait methods implemented with comprehensive tests
+**Phase 5 Plans:**
+| Plan | Status | Key Deliverable |
+|------|--------|-----------------|
+| 05-01 | ✓ **Complete** | create_volumes_and_attach() with EBS AZ-aware volume creation and attachment |
+| 05-02 | Pending | EBS volume deletion and comprehensive storage tests |
 
-**Last activity:** 2026-01-31 - Completed 04-02-PLAN.md (wait_for_public_ip implementation)
+**Status:** Phase 5 Plan 1 Complete - EBS volume creation and attachment implemented
+
+**Last activity:** 2026-01-31 - Completed 05-01-PLAN.md (create_volumes_and_attach implementation)
 
 **Phase Progress:**
 ```
-Overall: [████████░░] 66% (4/6 phases complete, Phase 5 pending)
+Overall: [█████████░] 71% (4/6 phases complete, Phase 5 in progress)
 Phase 1: [██████████] 100% (3/3 plans complete) ✓
 Phase 2: [██████████] 100% (2/2 plans complete) ✓
 Phase 3: [██████████] 100% (2/2 plans complete) ✓
 Phase 4: [██████████] 100% (2/2 plans complete) ✓
-Phase 5: [░░░░░░░░░░] 0% (Not started)
+Phase 5: [█████░░░░░] 50% (1/2 plans complete, 1 pending)
 Phase 6: [░░░░░░░░░░] 0% (Not started)
 ```
 
-**Current Focus:** Phase 4 - Instance Lifecycle Waiting (04-02 next)
+**Current Focus:** Phase 5 - Storage Integration (05-02 next)
 
 ---
 
@@ -152,6 +158,18 @@ Phase 6: [░░░░░░░░░░] 0% (Not started)
 | Reuse wait_for_started pattern | Consistent exponential backoff and retry logic across wait methods |
 | Public IP validation | Check both `is not None` and `!= ""` for robust IP detection |
 
+### New Decisions from 05-01
+
+| Decision | Rationale |
+|----------|-----------|
+| gp3 volume type for EBS | Better performance than gp2 (higher IOPS, lower cost) |
+| Encryption enabled by default | Security best practice for data at rest |
+| Device naming /dev/sd[f-p] | AWS convention for additional volumes (up to 11) |
+| AZ-aware volume creation | EBS volumes must be in same AZ as instance |
+| Cleanup on failure | Delete created volumes if any attachment fails to avoid orphaned resources |
+| Tag at creation | Use TagSpecifications for atomic tagging during create_volume |
+| Waiter pattern for volumes | Use get_waiter('volume_available') and get_waiter('volume_in_use') |
+
 ### Risks & Mitigations
 
 | Risk | Impact | Mitigation |
@@ -182,34 +200,36 @@ None currently.
 | Phase 2 | **Complete** | 2026-01-31 | SSH key management: create, delete, comprehensive tests |
 | Phase 3 | **Complete** | 2026-01-31 | Core EC2 operations: create, delete, get instance with state mapping |
 | Phase 4 | **Complete** | 2026-01-31 | Instance lifecycle waiting: wait_for_started(), wait_for_public_ip() with tests |
-| Phase 5 | Pending | - | EBS storage |
+| Phase 5 | **In Progress** | - | EBS storage: create_volumes_and_attach() implemented |
 | Phase 6 | Pending | - | Integration & testing |
 
 ---
 
 ## Session Continuity
 
-**Last Action:** Completed 04-02-PLAN.md - wait_for_public_ip() implementation with:
-- Exponential backoff: `sleep_time = min(backoff * (2 ** attempt), 60)`
-- Empty string IP validation: `ip_address is not None and ip_address != ""`
-- InvalidInstanceID.NotFound handling via retry on None
-- TimeoutError with descriptive message after limit exceeded
-- 6 comprehensive unit tests (all passing)
+**Last Action:** Completed 05-01-PLAN.md - create_volumes_and_attach() implementation with:
+- _get_instance_az() helper using describe_instances API
+- _create_volume() with gp3 type, encryption, and comprehensive tagging
+- _attach_volume() with /dev/sd[f-p] device naming and waiters
+- _delete_volume() cleanup helper for error handling
+- Volume validation: size_gb > 0, format in ['ext4', 'xfs']
+- Cleanup on failure: delete created volumes if attachment fails
+- AZ-aware volume creation (EBS volumes must match instance AZ)
 
 **Next Actions:**
-1. Execute Phase 5 - EBS Storage (create_volumes_and_attach)
-2. Phase 5 delivers persistent storage for GPU workers
+1. Execute Phase 5 Plan 2 - EBS volume deletion and storage tests
+2. Phase 6 - Integration & testing after storage complete
 
 **Context for Next Session:**
 - Phase 1 Foundation complete ✓
 - Phase 2 SSH Key Management complete ✓
 - Phase 3 Core EC2 Operations complete ✓
 - Phase 4 Instance Lifecycle Waiting complete ✓
-  - wait_for_started() with exponential backoff ✓
-  - wait_for_public_ip() with exponential backoff ✓
-  - InvalidInstanceID.NotFound retry logic ✓
-  - Empty string IP handling ✓
-  - 12 unit tests passing (6 + 6) ✓
+- Phase 5 Storage Integration - Plan 1 complete ✓
+  - create_volumes_and_attach() with AZ awareness ✓
+  - gp3 encrypted volumes with proper tagging ✓
+  - /dev/sd[f-p] device naming (up to 11 volumes) ✓
+  - Cleanup on failure pattern ✓
 - Key patterns established:
   - Exponential backoff with cap: `min(backoff * 2^attempt, 60)`
   - Retry on None for eventual consistency
