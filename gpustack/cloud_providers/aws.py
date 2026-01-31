@@ -6,7 +6,8 @@ providing async operations for GPU instance lifecycle management.
 
 import asyncio
 import logging
-from typing import List, Optional, Dict, Any
+import secrets
+from typing import List, Optional, Dict, Any, Tuple
 
 from aiobotocore.session import get_session
 from botocore.config import Config
@@ -90,35 +91,57 @@ class AWSClient(ProviderClientBase):
             config=self.boto_config,
         )
 
-    def _handle_aws_error(self, error: Exception, operation: str) -> None:
+    def _handle_aws_error(self, error: Exception, operation: str) -> RuntimeError:
         """Convert AWS exceptions to user-friendly error messages.
 
         Args:
             error: The exception raised by AWS SDK
             operation: Description of the operation being performed
 
-        Raises:
-            RuntimeError: With user-friendly message wrapping the original error
+        Returns:
+            RuntimeError with user-friendly message wrapping the original error
         """
         if isinstance(error, ClientError):
             error_code = error.response["Error"]["Code"]
             error_msg = error.response["Error"]["Message"]
             logger.error(f"AWS {operation} failed: {error_code} - {error_msg}")
-            raise RuntimeError(f"AWS {operation} failed: {error_code}") from error
+            return RuntimeError(f"AWS {operation} failed: {error_code} - {error_msg}")
         elif isinstance(error, NoCredentialsError):
             logger.error(f"AWS credentials invalid for {operation}")
-            raise RuntimeError(
+            return RuntimeError(
                 "Invalid AWS credentials. Please check your access key and secret key."
-            ) from error
+            )
         elif isinstance(error, EndpointConnectionError):
             logger.error(f"AWS connection failed for {operation}: {error}")
-            raise RuntimeError(
+            return RuntimeError(
                 f"Cannot connect to AWS EC2 in region {self.region}. "
                 "Please check your network connection."
-            ) from error
+            )
         else:
             logger.error(f"Unexpected error during {operation}: {error}")
-            raise
+            return RuntimeError(f"AWS {operation} failed: {str(error)}")
+
+    async def _check_key_exists(
+        self, client, key_name: str
+    ) -> Tuple[bool, Optional[str]]:
+        """Check if EC2 key pair exists in AWS.
+
+        Args:
+            client: aiobotocore EC2 client
+            key_name: Name of the key pair to check
+
+        Returns:
+            Tuple of (exists: bool, fingerprint: Optional[str])
+        """
+        try:
+            response = await client.describe_key_pairs(KeyNames=[key_name])
+            key_info = response.get("KeyPairs", [{}])[0]
+            fingerprint = key_info.get("KeyFingerprint")
+            return True, fingerprint
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "InvalidKeyPair.NotFound":
+                return False, None
+            raise self._handle_aws_error(e, "SSH key existence check")
 
     async def validate_credentials(self) -> bool:
         """Validate AWS credentials by calling EC2 describe_regions.
@@ -142,10 +165,8 @@ class AWSClient(ProviderClientBase):
                 raise RuntimeError(
                     "AWS credentials validation failed: no regions returned"
                 )
-        except ClientError as e:
-            self._handle_aws_error(e, "credential validation")
-        except NoCredentialsError as e:
-            self._handle_aws_error(e, "credential validation")
+        except (ClientError, NoCredentialsError) as e:
+            raise self._handle_aws_error(e, "credential validation")
         except Exception as e:
             logger.error(f"Unexpected error during credential validation: {e}")
             raise RuntimeError(f"Failed to validate AWS credentials: {str(e)}") from e
@@ -238,21 +259,71 @@ class AWSClient(ProviderClientBase):
         )
 
     async def create_ssh_key(self, worker_name: str, public_key: str) -> str:
-        """Create EC2 key pair (stub for Phase 2 implementation).
+        """Import SSH public key to AWS EC2 as a key pair.
+
+        Generates a unique key pair name and imports the provided public key
+        to AWS EC2 using the import_key_pair API. Checks for existing keys
+        to prevent duplicates and applies AWS tags for resource management.
 
         Args:
-            worker_name: Name for the key pair
-            public_key: SSH public key material
+            worker_name: Name of the worker (used in key naming)
+            public_key: SSH public key in OpenSSH format (e.g., ssh-ed25519 AAAAC3...)
 
         Returns:
-            AWS key pair ID
+            AWS key pair name (the identifier used for instance creation)
 
         Raises:
-            NotImplementedError: Full implementation in Phase 2
+            RuntimeError: If key already exists, key format is invalid, or API call fails
         """
-        raise NotImplementedError(
-            "create_ssh_key implementation pending Phase 2 (EC2 Operations)"
-        )
+        # Generate key name with random suffix for uniqueness
+        suffix = secrets.token_hex(4)  # 8-character hex suffix
+        key_name = f"gpustack-{worker_name}-{suffix}"
+
+        async with self._get_client() as client:
+            # Check if key already exists to prevent duplicate errors
+            exists, fingerprint = await self._check_key_exists(client, key_name)
+            if exists:
+                raise RuntimeError(
+                    f"Key pair '{key_name}' already exists in AWS. "
+                    f"Fingerprint: {fingerprint}. "
+                    "Please delete the existing key or use a different worker name."
+                )
+
+            # Import the public key
+            try:
+                response = await client.import_key_pair(
+                    KeyName=key_name,
+                    PublicKeyMaterial=public_key.encode("utf-8"),
+                    TagSpecifications=[
+                        {
+                            "ResourceType": "key-pair",
+                            "Tags": [
+                                {"Key": "ManagedBy", "Value": "GPUStack"},
+                                {"Key": "WorkerName", "Value": worker_name},
+                            ],
+                        }
+                    ],
+                )
+
+                imported_fingerprint = response.get("KeyFingerprint")
+                logger.info(
+                    f"Imported SSH key '{key_name}' to AWS. "
+                    f"Fingerprint: {imported_fingerprint}"
+                )
+                return response["KeyName"]
+
+            except ClientError as e:
+                error_code = e.response["Error"]["Code"]
+                if error_code == "InvalidKey.Format":
+                    raise RuntimeError(
+                        "Invalid SSH public key format. "
+                        "AWS requires OpenSSH format (ssh-ed25519 AAAAC3... or ssh-rsa AAAAB3...)"
+                    ) from e
+                elif error_code == "InvalidKeyPair.Duplicate":
+                    raise RuntimeError(
+                        f"Key pair '{key_name}' already exists in AWS"
+                    ) from e
+                raise self._handle_aws_error(e, "SSH key import")
 
     async def delete_ssh_key(self, id: str) -> None:
         """Delete EC2 key pair (stub for Phase 2 implementation).
