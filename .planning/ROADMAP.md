@@ -189,6 +189,13 @@ Plans:
 4. Unit tests cover all SSH key management operations
 5. All tests pass with moto mocks and code coverage meets GPUStack standards
 
+**Plans:** 3 plans in 2 waves
+
+Plans:
+- [ ] 06-01-PLAN.md — Factory integration tests for get_client_from_provider()
+- [ ] 06-02-PLAN.md — Test suite validation and coverage report
+- [ ] 06-03-PLAN.md — Integration documentation and final verification
+
 ---
 
 ## Coverage Validation
