@@ -79,7 +79,7 @@ This roadmap delivers AWS EC2 GPU instance support to GPUStack through 6 increme
 **Plans:** 2 plans in 2 waves
 
 Plans:
-- [ ] 02-01-PLAN.md — Implement create_ssh_key with import_key_pair, collision detection, and tagging
+- [x] 02-01-PLAN.md — Implement create_ssh_key with import_key_pair, collision detection, and tagging
 - [ ] 02-02-PLAN.md — Implement delete_ssh_key and comprehensive unit tests
 
 ---

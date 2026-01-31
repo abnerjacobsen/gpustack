@@ -39,24 +39,24 @@
 | 01-02 | ✓ Complete | AWSClient with aiobotocore integration |
 | 01-03 | ✓ Complete | Factory integration, credential validation, tests |
 
-**Next Plan:** 02-01 - SSH Key Management (EC2 key pair operations)
+**Active Plan:** 02-02 - SSH Key Management (delete_ssh_key and tests)
 
-**Status:** Phase 1 complete, ready for Phase 2
+**Status:** Phase 2 In Progress - 50% complete (1/2 plans done)
 
-**Last activity:** 2026-01-31 - Completed 01-03-PLAN.md (Factory Integration)
+**Last activity:** 2026-01-31 - Completed 02-01-PLAN.md (create_ssh_key implementation)
 
 **Phase Progress:**
 ```
-Overall: [████░░░░░░] 33% (1/6 phases complete, 1 in progress)
+Overall: [█████░░░░░] 36% (1/6 phases complete, 1 in progress)
 Phase 1: [██████████] 100% (3/3 plans complete) ✓
-Phase 2: [░░░░░░░░░░] 0% (Not started)
+Phase 2: [█████░░░░░] 50% (1/2 plans complete)
 Phase 3: [░░░░░░░░░░] 0% (Not started)
 Phase 4: [░░░░░░░░░░] 0% (Not started)
 Phase 5: [░░░░░░░░░░] 0% (Not started)
 Phase 6: [░░░░░░░░░░] 0% (Not started)
 ```
 
-**Current Focus:** Phase 2 - SSH key pair management for AWS EC2
+**Current Focus:** Phase 2 - SSH key pair deletion and unit tests
 
 ---
 
@@ -72,7 +72,8 @@ Phase 6: [░░░░░░░░░░] 0% (Not started)
 | Factory integration | ✓ | ✓ |
 | Test coverage | TBD | >80% |
 | AWS integration | In Progress | Complete |
-| Phase 2 started | Pending | In Progress |
+| Phase 2 started | ✓ | In Progress |
+| create_ssh_key implemented | ✓ | Complete |
 
 ---
 
@@ -93,6 +94,9 @@ Phase 6: [░░░░░░░░░░] 0% (Not started)
 | Factory registration | Lambda extraction from CloudCredential | → Implemented in 01-03 |
 | Credential validation | EC2 describe_regions | → Implemented in 01-03 |
 | Testing approach | moto mock_aws | → Implemented in 01-03 |
+| Key naming pattern | gpustack-{worker}-{suffix} | → Implemented in 02-01 |
+| Collision detection | describe_key_pairs before import | → Implemented in 02-01 |
+| AWS resource tagging | TagSpecifications with ManagedBy | → Implemented in 02-01 |
 
 ### Risks & Mitigations
 
@@ -121,7 +125,7 @@ None currently.
 |-------|--------|-----------|--------------|
 | Planning | Complete | 2026-01-31 | Roadmap created, 6 phases defined |
 | Phase 1 | **Complete** | 2026-01-31 | AWS Schema, AWSClient, Factory integration, Tests |
-| Phase 2 | Pending | - | SSH key management |
+| Phase 2 | **In Progress** | 2026-01-31 | SSH key creation complete |
 | Phase 3 | Pending | - | Core EC2 operations |
 | Phase 4 | Pending | - | Instance waiting logic |
 | Phase 5 | Pending | - | EBS storage |
@@ -131,20 +135,19 @@ None currently.
 
 ## Session Continuity
 
-**Last Action:** Completed 01-03-PLAN.md - Factory Integration
+**Last Action:** Completed 02-01-PLAN.md - create_ssh_key implementation with import_key_pair API
 
 **Next Actions:**
-1. Begin `02-ssh-keys-PLAN.md` - SSH Key Management for AWS EC2
-2. Implement create_ssh_key() and delete_ssh_key() methods in AWSClient
-3. Add EC2 key pair operations with moto tests
+1. Begin `02-02-PLAN.md` - Implement delete_ssh_key and comprehensive unit tests
+2. Add SSH key tests with moto mocking for create and delete operations
+3. Complete Phase 2 (SSH Key Management)
 
 **Context for Next Session:**
-- Phase 1 Foundation is complete ✓
-- AWSClient registered in factory with `ClusterProvider.AWS`
-- Credential validation working via `validate_credentials()`
-- Unit tests established with moto mocking
-- Files created: `gpustack/schemas/aws.py`, `gpustack/cloud_providers/aws.py`, `tests/cloud_providers/test_aws.py`
-- Files modified: `gpustack/schemas/clusters.py`, `gpustack/cloud_providers/common.py`, `pyproject.toml`
+- Phase 1 Foundation complete ✓
+- create_ssh_key() implemented with collision detection and AWS tagging ✓
+- Key naming pattern established: `gpustack-{worker_name}-{8-char-hex-suffix}`
+- _check_key_exists() helper available for reuse in delete_ssh_key
+- Files modified: `gpustack/cloud_providers/aws.py` (create_ssh_key, _check_key_exists)
 
 ---
 
