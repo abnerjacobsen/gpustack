@@ -1,9 +1,9 @@
 # GPUStack AWS Cloud Provider - Project State
 
 **Project:** AWS EC2 GPU Integration for GPUStack  
-**Current Phase:** 3 - Core EC2 Operations ✓ **COMPLETE**  
+**Current Phase:** 4 - Instance Lifecycle Waiting ✓ **IN PROGRESS**  
 **Last Updated:** 2026-01-31  
-**Status:** Phase 3 Complete - Full EC2 Instance Lifecycle Implemented
+**Status:** Phase 4 Plan 1 Complete - wait_for_started() implemented with tests
 
 ---
 
@@ -17,21 +17,23 @@
 - **Scope:** v1 covers EC2, EBS, basic networking; v2 adds Spot, cost optimization
 - **Factory Registration:** AWSClient registered with credential extraction lambda
 - **Credential Validation:** EC2 describe_regions for lightweight auth check
-- **Testing:** moto mock_aws decorator for AWS API mocking
+- **Testing:** Mocking with unittest.mock for unit tests (pytest-asyncio/moto compatibility issues)
 - **Idempotent Deletion:** InvalidInstanceID.NotFound and IncorrectState treated as success
 - **State Mapping:** AWS states (pending, running, etc.) mapped to InstanceState enum
 - **Public IP Extraction:** Priority - NetworkInterfaces first, then PublicIpAddress
+- **Polling Backoff:** Exponential with 60s cap: `min(backoff * 2^attempt, 60)`
+- **Eventual Consistency:** Treat None from get_instance() as retryable, not failure
 
 **Constraints:**
 - Python 3.10+, async codebase (FastAPI, SQLModel)
 - Black (88 char), flake8, type hints required
-- pytest with moto for AWS mocking
+- pytest with mocking for AWS unit testing
 
 ---
 
 ## Current Position
 
-**Active Phase:** Phase 4 - Instance Lifecycle Waiting (Planned - Ready to Execute)
+**Active Phase:** Phase 4 - Instance Lifecycle Waiting (In Progress - 1/2 complete)
 
 **Previous Phase:** Phase 3 - Core EC2 Operations ✓ **COMPLETE**
 
@@ -57,25 +59,25 @@
 **Phase 4 Plans:**
 | Plan | Status | Key Deliverable |
 |------|--------|-----------------|
-| 04-01 | Planned | wait_for_started() with exponential backoff and retry |
+| 04-01 | ✓ **Complete** | wait_for_started() with exponential backoff and retry |
 | 04-02 | Planned | wait_for_public_ip() with exponential backoff and tests |
 
-**Status:** Phase 4 Planned - Ready for Execution
+**Status:** Phase 4 in Progress - 04-01 complete, ready for 04-02
 
-**Last activity:** 2026-01-31 - Created 04-01-PLAN.md and 04-02-PLAN.md for Instance Lifecycle Waiting
+**Last activity:** 2026-01-31 - Completed 04-01-PLAN.md (wait_for_started implementation)
 
 **Phase Progress:**
 ```
-Overall: [████████░░] 50% (3/6 phases complete, 1 planned)
+Overall: [████████░░] 60% (3/6 phases complete, Phase 4 in progress)
 Phase 1: [██████████] 100% (3/3 plans complete) ✓
 Phase 2: [██████████] 100% (2/2 plans complete) ✓
 Phase 3: [██████████] 100% (2/2 plans complete) ✓
-Phase 4: [░░░░░░░░░░] 0% (Planned - 2 plans ready)
+Phase 4: [█████░░░░░] 50% (1/2 plans complete)
 Phase 5: [░░░░░░░░░░] 0% (Not started)
 Phase 6: [░░░░░░░░░░] 0% (Not started)
 ```
 
-**Current Focus:** Phase 4 - Instance Lifecycle Waiting (Ready to execute)
+**Current Focus:** Phase 4 - Instance Lifecycle Waiting (04-02 next)
 
 ---
 
@@ -89,6 +91,7 @@ Phase 6: [░░░░░░░░░░] 0% (Not started)
 | Phase 1 complete | ✓ | ✓ |
 | Phase 2 complete | ✓ | ✓ |
 | Phase 3 complete | ✓ | ✓ |
+| Phase 4 plan 1 complete | ✓ | ✓ |
 | AWSClient implemented | ✓ | ✓ |
 | Factory integration | ✓ | ✓ |
 | Test coverage | TBD | >80% |
@@ -96,6 +99,7 @@ Phase 6: [░░░░░░░░░░] 0% (Not started)
 | create_instance implemented | ✓ | ✓ |
 | delete_instance implemented | ✓ | ✓ |
 | get_instance implemented | ✓ | ✓ |
+| wait_for_started implemented | ✓ | ✓ |
 | EC2 lifecycle complete | ✓ | ✓ |
 
 ---
@@ -116,24 +120,33 @@ Phase 6: [░░░░░░░░░░] 0% (Not started)
 | Retry policy | max_attempts=10 with adaptive mode | → Implemented in 01-02 |
 | Factory registration | Lambda extraction from CloudCredential | → Implemented in 01-03 |
 | Credential validation | EC2 describe_regions | → Implemented in 01-03 |
-| Testing approach | moto mock_aws | → Implemented in 01-03 |
+| Testing approach | Mocking with unittest.mock | → Implemented in 04-01 |
 | Key naming pattern | gpustack-{worker}-{suffix} | → Implemented in 02-01 |
 | Collision detection | describe_key_pairs before import | → Implemented in 02-01 |
 | AWS resource tagging | TagSpecifications with ManagedBy | → Implemented in 02-01 |
 | Idempotent deletion | InvalidKeyPair.NotFound treated as success | → Implemented in 02-02 |
-| AWS testing pattern | moto mock_aws with aiobotocore | → Established in 02-02 |
 | DLAMI mapping | Static with documented update process | → Implemented in 03-01 |
 | Network configuration | subnet_id -> NetworkInterfaces | → Implemented in 03-01 |
 | Tagging strategy | Base tags + custom labels | → Implemented in 03-01 |
 | Instance termination | Idempotent via terminate_instances | → Implemented in 03-02 |
 | State mapping | AWS states -> InstanceState enum | → Implemented in 03-02 |
 | Public IP extraction | NetworkInterfaces then PublicIpAddress | → Implemented in 03-02 |
+| Polling backoff | Exponential with 60s cap | → Implemented in 04-01 |
+| Eventual consistency | Retry on None from get_instance() | → Implemented in 04-01 |
+
+### New Decisions from 04-01
+
+| Decision | Rationale |
+|----------|-----------|
+| Use mocking instead of moto for unit tests | pytest-asyncio/moto compatibility issues; mocking is more reliable |
+| Cap exponential backoff at 60 seconds | Prevent excessive wait times (15 * 2^40 would be huge) |
+| Treat None from get_instance() as eventual consistency | AWS's eventual consistency means instance may not appear immediately after creation |
 
 ### Risks & Mitigations
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| AWS eventual consistency | High | Exponential backoff in WAIT phase (max_attempts=10 configured) |
+| AWS eventual consistency | High | Exponential backoff in wait_for_started() with retry on None |
 | Rate limiting | Medium | Retry policy (10 attempts) configured in AWSClient |
 | IAM permissions | High | Document minimum permissions, test with restricted role |
 | AMI compatibility | Medium | Validate GPU accessibility in Phase 3 |
@@ -158,7 +171,7 @@ None currently.
 | Phase 1 | **Complete** | 2026-01-31 | AWS Schema, AWSClient, Factory integration, Tests |
 | Phase 2 | **Complete** | 2026-01-31 | SSH key management: create, delete, comprehensive tests |
 | Phase 3 | **Complete** | 2026-01-31 | Core EC2 operations: create, delete, get instance with state mapping |
-| Phase 4 | Pending | - | Instance waiting logic |
+| Phase 4 | **In Progress** | - | Plan 1 complete: wait_for_started() with exponential backoff |
 | Phase 5 | Pending | - | EBS storage |
 | Phase 6 | Pending | - | Integration & testing |
 
@@ -166,34 +179,30 @@ None currently.
 
 ## Session Continuity
 
-**Last Action:** Completed 03-02-PLAN.md - delete_instance() and get_instance() implementations with:
-- Idempotent termination handling (InvalidInstanceID.NotFound, IncorrectState)
-- AWS state to InstanceState enum mapping
-- Public IP extraction from network interfaces
-- 9 comprehensive unit tests
+**Last Action:** Completed 04-01-PLAN.md - wait_for_started() implementation with:
+- Exponential backoff: `sleep_time = min(backoff * (2 ** attempt), 60)`
+- InvalidInstanceID.NotFound handling via retry on None
+- TimeoutError with descriptive message after limit exceeded
+- 6 comprehensive unit tests (all passing)
 
 **Next Actions:**
-1. Execute `04-01-PLAN.md` - Implement wait_for_started() with polling
-2. Execute `04-02-PLAN.md` - Implement wait_for_public_ip() with polling
-3. Phase 4 delivers reliable instance readiness detection
+1. Execute `04-02-PLAN.md` - Implement wait_for_public_ip() with polling
+2. Phase 4 delivers reliable instance readiness detection
 
 **Context for Next Session:**
 - Phase 1 Foundation complete ✓
 - Phase 2 SSH Key Management complete ✓
 - Phase 3 Core EC2 Operations complete ✓
-  - create_instance() with DLAMI and tagging ✓
-  - delete_instance() with idempotent termination ✓
-  - get_instance() with state mapping and IP extraction ✓
-  - 15 total unit tests for EC2 operations ✓
+- Phase 4 Plan 1 complete ✓
+  - wait_for_started() with exponential backoff ✓
+  - InvalidInstanceID.NotFound retry logic ✓
+  - 60s cap on backoff ✓
+  - 6 unit tests passing ✓
 - Key patterns established:
-  - Idempotent operations (log warning, don't error on already-deleted)
-  - AWS error code checking before generic error handling
-  - State mapping via status_mapping dictionary
-  - Response parsing with .get() defaults for safety
-- **Next: Phase 4 - Instance Lifecycle Waiting**
-  - wait_for_started(): Poll until instance reaches RUNNING state
-  - wait_for_public_ip(): Poll until public IP is assigned
-  - Exponential backoff for AWS eventual consistency
+  - Exponential backoff with cap: `min(backoff * 2^attempt, 60)`
+  - Retry on None for eventual consistency
+  - DEBUG logging with attempt counter and status
+- **Next: Phase 4 Plan 2 - wait_for_public_ip()**
 
 ---
 
