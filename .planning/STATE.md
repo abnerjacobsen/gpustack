@@ -33,7 +33,7 @@
 
 ## Current Position
 
-**Active Phase:** Phase 4 - Instance Lifecycle Waiting (In Progress - 1/2 complete)
+**Active Phase:** Phase 4 - Instance Lifecycle Waiting ✓ **COMPLETE**
 
 **Previous Phase:** Phase 3 - Core EC2 Operations ✓ **COMPLETE**
 
@@ -60,19 +60,19 @@
 | Plan | Status | Key Deliverable |
 |------|--------|-----------------|
 | 04-01 | ✓ **Complete** | wait_for_started() with exponential backoff and retry |
-| 04-02 | Planned | wait_for_public_ip() with exponential backoff and tests |
+| 04-02 | ✓ **Complete** | wait_for_public_ip() with exponential backoff and tests |
 
-**Status:** Phase 4 in Progress - 04-01 complete, ready for 04-02
+**Status:** Phase 4 Complete - Both wait methods implemented with comprehensive tests
 
-**Last activity:** 2026-01-31 - Completed 04-01-PLAN.md (wait_for_started implementation)
+**Last activity:** 2026-01-31 - Completed 04-02-PLAN.md (wait_for_public_ip implementation)
 
 **Phase Progress:**
 ```
-Overall: [████████░░] 60% (3/6 phases complete, Phase 4 in progress)
+Overall: [████████░░] 66% (4/6 phases complete, Phase 5 pending)
 Phase 1: [██████████] 100% (3/3 plans complete) ✓
 Phase 2: [██████████] 100% (2/2 plans complete) ✓
 Phase 3: [██████████] 100% (2/2 plans complete) ✓
-Phase 4: [█████░░░░░] 50% (1/2 plans complete)
+Phase 4: [██████████] 100% (2/2 plans complete) ✓
 Phase 5: [░░░░░░░░░░] 0% (Not started)
 Phase 6: [░░░░░░░░░░] 0% (Not started)
 ```
@@ -100,7 +100,9 @@ Phase 6: [░░░░░░░░░░] 0% (Not started)
 | delete_instance implemented | ✓ | ✓ |
 | get_instance implemented | ✓ | ✓ |
 | wait_for_started implemented | ✓ | ✓ |
+| wait_for_public_ip implemented | ✓ | ✓ |
 | EC2 lifecycle complete | ✓ | ✓ |
+| Phase 4 complete | ✓ | ✓ |
 
 ---
 
@@ -142,6 +144,14 @@ Phase 6: [░░░░░░░░░░] 0% (Not started)
 | Cap exponential backoff at 60 seconds | Prevent excessive wait times (15 * 2^40 would be huge) |
 | Treat None from get_instance() as eventual consistency | AWS's eventual consistency means instance may not appear immediately after creation |
 
+### New Decisions from 04-02
+
+| Decision | Rationale |
+|----------|-----------|
+| Empty string IP handling | Treat empty string same as None - AWS may return "" before IP assignment |
+| Reuse wait_for_started pattern | Consistent exponential backoff and retry logic across wait methods |
+| Public IP validation | Check both `is not None` and `!= ""` for robust IP detection |
+
 ### Risks & Mitigations
 
 | Risk | Impact | Mitigation |
@@ -171,7 +181,7 @@ None currently.
 | Phase 1 | **Complete** | 2026-01-31 | AWS Schema, AWSClient, Factory integration, Tests |
 | Phase 2 | **Complete** | 2026-01-31 | SSH key management: create, delete, comprehensive tests |
 | Phase 3 | **Complete** | 2026-01-31 | Core EC2 operations: create, delete, get instance with state mapping |
-| Phase 4 | **In Progress** | - | Plan 1 complete: wait_for_started() with exponential backoff |
+| Phase 4 | **Complete** | 2026-01-31 | Instance lifecycle waiting: wait_for_started(), wait_for_public_ip() with tests |
 | Phase 5 | Pending | - | EBS storage |
 | Phase 6 | Pending | - | Integration & testing |
 
@@ -179,30 +189,33 @@ None currently.
 
 ## Session Continuity
 
-**Last Action:** Completed 04-01-PLAN.md - wait_for_started() implementation with:
+**Last Action:** Completed 04-02-PLAN.md - wait_for_public_ip() implementation with:
 - Exponential backoff: `sleep_time = min(backoff * (2 ** attempt), 60)`
+- Empty string IP validation: `ip_address is not None and ip_address != ""`
 - InvalidInstanceID.NotFound handling via retry on None
 - TimeoutError with descriptive message after limit exceeded
 - 6 comprehensive unit tests (all passing)
 
 **Next Actions:**
-1. Execute `04-02-PLAN.md` - Implement wait_for_public_ip() with polling
-2. Phase 4 delivers reliable instance readiness detection
+1. Execute Phase 5 - EBS Storage (create_volumes_and_attach)
+2. Phase 5 delivers persistent storage for GPU workers
 
 **Context for Next Session:**
 - Phase 1 Foundation complete ✓
 - Phase 2 SSH Key Management complete ✓
 - Phase 3 Core EC2 Operations complete ✓
-- Phase 4 Plan 1 complete ✓
+- Phase 4 Instance Lifecycle Waiting complete ✓
   - wait_for_started() with exponential backoff ✓
+  - wait_for_public_ip() with exponential backoff ✓
   - InvalidInstanceID.NotFound retry logic ✓
-  - 60s cap on backoff ✓
-  - 6 unit tests passing ✓
+  - Empty string IP handling ✓
+  - 12 unit tests passing (6 + 6) ✓
 - Key patterns established:
   - Exponential backoff with cap: `min(backoff * 2^attempt, 60)`
   - Retry on None for eventual consistency
-  - DEBUG logging with attempt counter and status
-- **Next: Phase 4 Plan 2 - wait_for_public_ip()**
+  - Empty string validation for IP addresses
+  - DEBUG logging with attempt counter
+- **Next: Phase 5 - EBS Storage**
 
 ---
 
