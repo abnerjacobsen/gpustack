@@ -34,10 +34,10 @@
 
 ### Instance Lifecycle Waiting
 
-- [ ] **WAIT-01**: System polls instance status until running (with configurable timeout)
-- [ ] **WAIT-02**: System polls for public IP assignment (with configurable timeout)
-- [ ] **WAIT-03**: System implements exponential backoff for AWS eventual consistency
-- [ ] **WAIT-04**: System handles InvalidInstanceID.NotFound errors with retry logic
+- [x] **WAIT-01**: System polls instance status until running (with configurable timeout)
+- [x] **WAIT-02**: System polls for public IP assignment (with configurable timeout)
+- [x] **WAIT-03**: System implements exponential backoff for AWS eventual consistency
+- [x] **WAIT-04**: System handles InvalidInstanceID.NotFound errors with retry logic
 
 ### Storage (EBS Volumes)
 
@@ -132,10 +132,10 @@
 | INST-06 | Phase 3 | Pending |
 | INST-07 | Phase 3 | Pending |
 | INST-08 | Phase 3 | Pending |
-| WAIT-01 | Phase 4 | Pending |
-| WAIT-02 | Phase 4 | Pending |
-| WAIT-03 | Phase 4 | Pending |
-| WAIT-04 | Phase 4 | Pending |
+| WAIT-01 | Phase 4 | Complete |
+| WAIT-02 | Phase 4 | Complete |
+| WAIT-03 | Phase 4 | Complete |
+| WAIT-04 | Phase 4 | Complete |
 | STOR-01 | Phase 5 | Pending |
 | STOR-02 | Phase 5 | Pending |
 | STOR-03 | Phase 5 | Pending |
