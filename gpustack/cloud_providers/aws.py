@@ -326,17 +326,26 @@ class AWSClient(ProviderClientBase):
                 raise self._handle_aws_error(e, "SSH key import")
 
     async def delete_ssh_key(self, id: str) -> None:
-        """Delete EC2 key pair (stub for Phase 2 implementation).
+        """Delete EC2 key pair by name.
 
         Args:
-            id: AWS key pair name or ID
+            id: AWS key pair name (the 'name' returned by create_ssh_key)
 
-        Raises:
-            NotImplementedError: Full implementation in Phase 2
+        Note:
+            This method is idempotent - if the key doesn't exist,
+            it logs a warning and returns successfully.
         """
-        raise NotImplementedError(
-            "delete_ssh_key implementation pending Phase 2 (EC2 Operations)"
-        )
+        async with self._get_client() as client:
+            try:
+                await client.delete_key_pair(KeyName=id)
+                logger.info(f"Deleted SSH key pair '{id}' from AWS")
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "InvalidKeyPair.NotFound":
+                    logger.warning(
+                        f"Key pair '{id}' not found in AWS (already deleted)"
+                    )
+                    return
+                raise self._handle_aws_error(e, "SSH key deletion")
 
     async def create_volumes_and_attach(
         self, worker_id: int, external_id: str, region: str, *volumes: Volume
