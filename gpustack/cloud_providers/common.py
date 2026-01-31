@@ -2,8 +2,10 @@ import base64
 from typing import Dict, Tuple, Type, Callable
 from .abstract import ProviderClientBase, CloudInstanceCreate
 from .digital_ocean import DigitalOceanClient
+from .aws import AWSClient
 from gpustack.schemas.clusters import ClusterProvider, CloudCredential, Credential
 from gpustack.schemas.workers import Worker
+from gpustack.schemas.aws import AWSConfig
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, ed25519
 
@@ -15,6 +17,32 @@ factory: Dict[
     ClusterProvider.DigitalOcean: (
         DigitalOceanClient,
         lambda credential: DigitalOceanClient(token=credential.secret),
+    ),
+    ClusterProvider.AWS: (
+        AWSClient,
+        lambda credential: AWSClient(
+            access_key=credential.key or "",
+            secret_key=credential.secret or "",
+            region=credential.options.get("region", "us-east-1")
+            if credential.options
+            else "us-east-1",
+            config=AWSConfig(
+                access_key=credential.key or "",
+                secret_key=credential.secret or "",
+                region=credential.options.get("region", "us-east-1")
+                if credential.options
+                else "us-east-1",
+                vpc_id=credential.options.get("vpc_id") if credential.options else None,
+                subnet_id=credential.options.get("subnet_id")
+                if credential.options
+                else None,
+                security_group_id=credential.options.get("security_group_id")
+                if credential.options
+                else None,
+            )
+            if credential.options
+            else None,
+        ),
     ),
 }
 
