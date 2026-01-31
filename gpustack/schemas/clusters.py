@@ -120,7 +120,7 @@ class WorkerPool(WorkerPoolBase, BaseModelMixin, table=True):
     @property
     def ready_workers(self) -> int:
         if self.pool_workers is not None:
-            return len([w for w in self.pool_workers if w.state.value == 'ready'])
+            return len([w for w in self.pool_workers if w.state.value == "ready"])
 
         return self._ready_workers
 
@@ -155,6 +155,7 @@ class ClusterProvider(Enum):
     Docker = "Docker"
     Kubernetes = "Kubernetes"
     DigitalOcean = "DigitalOcean"
+    AWS = "AWS"
 
 
 class CloudCredentialBase(SQLModel):
@@ -212,10 +213,10 @@ CloudCredentialsPublic = PaginatedList[CloudCredentialPublic]
 
 
 class ClusterStateEnum(str, Enum):
-    PENDING = 'pending'
-    PROVISIONING = 'provisioning'
-    PROVISIONED = 'provisioned'
-    READY = 'ready'
+    PENDING = "pending"
+    PROVISIONING = "provisioning"
+    PROVISIONED = "provisioned"
+    READY = "ready"
 
 
 class ClusterUpdate(SQLModel):
@@ -310,7 +311,7 @@ class Cluster(ClusterBase, BaseModelMixin, table=True):
     @property
     def ready_workers(self) -> int:
         if self.cluster_workers is not None:
-            return len([w for w in self.cluster_workers if w.state.value == 'ready'])
+            return len([w for w in self.cluster_workers if w.state.value == "ready"])
 
         return self._ready_workers
 
