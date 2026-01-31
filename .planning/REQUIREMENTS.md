@@ -124,39 +124,39 @@
 | SSH-02 | Phase 2 | Pending |
 | SSH-03 | Phase 2 | Pending |
 | SSH-04 | Phase 2 | Pending |
-| INST-01 | Phase 2 | Pending |
-| INST-02 | Phase 2 | Pending |
-| INST-03 | Phase 2 | Pending |
-| INST-04 | Phase 2 | Pending |
-| INST-05 | Phase 2 | Pending |
-| INST-06 | Phase 2 | Pending |
-| INST-07 | Phase 2 | Pending |
-| INST-08 | Phase 2 | Pending |
-| WAIT-01 | Phase 3 | Pending |
-| WAIT-02 | Phase 3 | Pending |
-| WAIT-03 | Phase 3 | Pending |
-| WAIT-04 | Phase 3 | Pending |
-| STOR-01 | Phase 4 | Pending |
-| STOR-02 | Phase 4 | Pending |
-| STOR-03 | Phase 4 | Pending |
-| STOR-04 | Phase 4 | Pending |
+| INST-01 | Phase 3 | Pending |
+| INST-02 | Phase 3 | Pending |
+| INST-03 | Phase 3 | Pending |
+| INST-04 | Phase 3 | Pending |
+| INST-05 | Phase 3 | Pending |
+| INST-06 | Phase 3 | Pending |
+| INST-07 | Phase 3 | Pending |
+| INST-08 | Phase 3 | Pending |
+| WAIT-01 | Phase 4 | Pending |
+| WAIT-02 | Phase 4 | Pending |
+| WAIT-03 | Phase 4 | Pending |
+| WAIT-04 | Phase 4 | Pending |
+| STOR-01 | Phase 5 | Pending |
+| STOR-02 | Phase 5 | Pending |
+| STOR-03 | Phase 5 | Pending |
+| STOR-04 | Phase 5 | Pending |
 | IMPL-01 | Phase 1 | Pending |
 | IMPL-02 | Phase 1 | Pending |
 | IMPL-03 | Phase 1 | Pending |
 | IMPL-04 | Phase 1 | Pending |
 | INTG-01 | Phase 1 | Pending |
-| INTG-02 | Phase 5 | Pending |
+| INTG-02 | Phase 6 | Pending |
 | INTG-03 | Phase 1 | Pending |
-| TEST-01 | Phase 5 | Pending |
-| TEST-02 | Phase 5 | Pending |
-| TEST-03 | Phase 5 | Pending |
-| TEST-04 | Phase 5 | Pending |
-| TEST-05 | Phase 5 | Pending |
-| TEST-06 | Phase 5 | Pending |
+| TEST-01 | Phase 6 | Pending |
+| TEST-02 | Phase 6 | Pending |
+| TEST-03 | Phase 6 | Pending |
+| TEST-04 | Phase 6 | Pending |
+| TEST-05 | Phase 6 | Pending |
+| TEST-06 | Phase 6 | Pending |
 
 **Coverage:**
-- v1 requirements: 32 total
-- Mapped to phases: 32
+- v1 requirements: 39 total
+- Mapped to phases: 39
 - Unmapped: 0 ✓
 
 ---
