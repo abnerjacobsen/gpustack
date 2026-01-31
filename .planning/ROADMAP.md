@@ -133,6 +133,12 @@ Plans:
 3. Polling uses exponential backoff to handle AWS eventual consistency
 4. System handles InvalidInstanceID.NotFound errors gracefully with retry logic
 
+**Plans:** 2 plans in 1 wave
+
+Plans:
+- [ ] 04-01-PLAN.md — Implement wait_for_started() with exponential backoff and retry logic
+- [ ] 04-02-PLAN.md — Implement wait_for_public_ip() with exponential backoff and comprehensive tests
+
 ---
 
 ## Phase 5: Storage Integration
