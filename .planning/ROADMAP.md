@@ -159,6 +159,12 @@ Plans:
 3. System validates that volume and instance are in the same AZ before attachment
 4. System returns and tracks volume IDs for lifecycle management
 
+**Plans:** 2 plans in 1 wave
+
+Plans:
+- [ ] 05-01-PLAN.md — Implement create_volumes_and_attach() with AZ awareness, device naming, and tagging
+- [ ] 05-02-PLAN.md — Comprehensive unit tests for EBS volume operations
+
 ---
 
 ## Phase 6: Integration & Testing
