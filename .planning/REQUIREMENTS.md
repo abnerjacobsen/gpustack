@@ -41,10 +41,10 @@
 
 ### Storage (EBS Volumes)
 
-- [ ] **STOR-01**: System can create EBS volume in specified AZ
-- [ ] **STOR-02**: System can attach EBS volume to EC2 instance
-- [ ] **STOR-03**: System validates volume and instance are in same AZ
-- [ ] **STOR-04**: System returns volume IDs for tracking
+- [x] **STOR-01**: System can create EBS volume in specified AZ
+- [x] **STOR-02**: System can attach EBS volume to EC2 instance
+- [x] **STOR-03**: System validates volume and instance are in same AZ
+- [x] **STOR-04**: System returns volume IDs for tracking
 
 ### Client Implementation
 
@@ -136,10 +136,10 @@
 | WAIT-02 | Phase 4 | Complete |
 | WAIT-03 | Phase 4 | Complete |
 | WAIT-04 | Phase 4 | Complete |
-| STOR-01 | Phase 5 | Pending |
-| STOR-02 | Phase 5 | Pending |
-| STOR-03 | Phase 5 | Pending |
-| STOR-04 | Phase 5 | Pending |
+| STOR-01 | Phase 5 | Complete |
+| STOR-02 | Phase 5 | Complete |
+| STOR-03 | Phase 5 | Complete |
+| STOR-04 | Phase 5 | Complete |
 | IMPL-01 | Phase 1 | Complete |
 | IMPL-02 | Phase 1 | Complete |
 | IMPL-03 | Phase 1 | Complete |
