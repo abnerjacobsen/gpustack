@@ -1,9 +1,9 @@
 # GPUStack AWS Cloud Provider - Project State
 
 **Project:** AWS EC2 GPU Integration for GPUStack  
-**Current Phase:** 1 - Foundation  
+**Current Phase:** 2 - SSH Key Management  
 **Last Updated:** 2026-01-31  
-**Status:** In Progress - Phase 1 executing  
+**Status:** In Progress - Phase 1 Complete, ready for Phase 2
 
 ---
 
@@ -15,6 +15,9 @@
 - **AWS SDK:** aiobotocore 3.1.1 for native async support
 - **Pattern:** Follow existing DigitalOcean provider implementation
 - **Scope:** v1 covers EC2, EBS, basic networking; v2 adds Spot, cost optimization
+- **Factory Registration:** AWSClient registered with credential extraction lambda
+- **Credential Validation:** EC2 describe_regions for lightweight auth check
+- **Testing:** moto mock_aws decorator for AWS API mocking
 
 **Constraints:**
 - Python 3.10+, async codebase (FastAPI, SQLModel)
@@ -25,20 +28,27 @@
 
 ## Current Position
 
-**Active Phase:** Phase 1 - Foundation & Configuration (1 of 6)
+**Active Phase:** Phase 2 - SSH Key Management (2 of 6)
 
-**Current Plan:** 01-02 (2 of 3 plans in phase) - AWS Client Foundation ✓ Complete
+**Previous Phase:** Phase 1 - Foundation & Configuration ✓ **COMPLETE**
 
-**Next Plan:** 01-03 - Factory Integration (enable AWS provider selection)
+**Phase 1 Plans:**
+| Plan | Status | Key Deliverable |
+|------|--------|-----------------|
+| 01-01 | ✓ Complete | AWSConfig schema, ClusterProvider.AWS enum |
+| 01-02 | ✓ Complete | AWSClient with aiobotocore integration |
+| 01-03 | ✓ Complete | Factory integration, credential validation, tests |
 
-**Status:** In progress
+**Next Plan:** 02-01 - SSH Key Management (EC2 key pair operations)
 
-**Last activity:** 2026-01-31 - Completed 01-02-PLAN.md (AWS Client Foundation)
+**Status:** Phase 1 complete, ready for Phase 2
+
+**Last activity:** 2026-01-31 - Completed 01-03-PLAN.md (Factory Integration)
 
 **Phase Progress:**
 ```
-Overall: [██░░░░░░░░] 16% (1/6 phases in progress)
-Phase 1: [████░░░░░░] 66% (2/3 plans complete)
+Overall: [████░░░░░░] 33% (1/6 phases complete, 1 in progress)
+Phase 1: [██████████] 100% (3/3 plans complete) ✓
 Phase 2: [░░░░░░░░░░] 0% (Not started)
 Phase 3: [░░░░░░░░░░] 0% (Not started)
 Phase 4: [░░░░░░░░░░] 0% (Not started)
@@ -46,7 +56,7 @@ Phase 5: [░░░░░░░░░░] 0% (Not started)
 Phase 6: [░░░░░░░░░░] 0% (Not started)
 ```
 
-**Current Focus:** Executing Phase 1 plans (foundation schemas and AWS client)
+**Current Focus:** Phase 2 - SSH key pair management for AWS EC2
 
 ---
 
@@ -57,10 +67,12 @@ Phase 6: [░░░░░░░░░░] 0% (Not started)
 | Requirements mapped | 39/39 | 39/39 ✓ |
 | Phases defined | 6 | 6 ✓ |
 | Success criteria defined | 27 | 27 ✓ |
+| Phase 1 complete | ✓ | ✓ |
+| AWSClient implemented | ✓ | ✓ |
+| Factory integration | ✓ | ✓ |
 | Test coverage | TBD | >80% |
 | AWS integration | In Progress | Complete |
-| Schema foundation | Complete | Complete ✓ |
-| AWSClient foundation | Complete | Complete ✓ |
+| Phase 2 started | Pending | In Progress |
 
 ---
 
@@ -78,6 +90,9 @@ Phase 6: [░░░░░░░░░░] 0% (Not started)
 | Region format | lowercase-hyphen pattern | → Implemented in 01-01 |
 | Secret handling | SecretStr vs plain string | → SecretStr selected |
 | Retry policy | max_attempts=10 with adaptive mode | → Implemented in 01-02 |
+| Factory registration | Lambda extraction from CloudCredential | → Implemented in 01-03 |
+| Credential validation | EC2 describe_regions | → Implemented in 01-03 |
+| Testing approach | moto mock_aws | → Implemented in 01-03 |
 
 ### Risks & Mitigations
 
@@ -105,7 +120,7 @@ None currently.
 | Phase | Status | Completed | Key Outcomes |
 |-------|--------|-----------|--------------|
 | Planning | Complete | 2026-01-31 | Roadmap created, 6 phases defined |
-| Phase 1 | In Progress | - | 01-01: AWS Schema Foundation complete, 01-02: AWSClient complete |
+| Phase 1 | **Complete** | 2026-01-31 | AWS Schema, AWSClient, Factory integration, Tests |
 | Phase 2 | Pending | - | SSH key management |
 | Phase 3 | Pending | - | Core EC2 operations |
 | Phase 4 | Pending | - | Instance waiting logic |
@@ -116,18 +131,20 @@ None currently.
 
 ## Session Continuity
 
-**Last Action:** Completed 01-02-PLAN.md - AWS Client Foundation
+**Last Action:** Completed 01-03-PLAN.md - Factory Integration
 
 **Next Actions:**
-1. Execute `01-03-PLAN.md` - Factory Integration (enable AWS provider selection)
-2. Continue with Phase 1 remaining plans
+1. Begin `02-ssh-keys-PLAN.md` - SSH Key Management for AWS EC2
+2. Implement create_ssh_key() and delete_ssh_key() methods in AWSClient
+3. Add EC2 key pair operations with moto tests
 
 **Context for Next Session:**
-- Schema foundation complete: ClusterProvider.AWS, AWSConfig, CloudCredential mapping
-- AWSClient complete: aiobotocore integration, retry config, exception handling
-- Files created: gpustack/schemas/aws.py, gpustack/cloud_providers/aws.py
-- Files modified: gpustack/schemas/clusters.py, pyproject.toml
-- Type foundation ready for factory integration
+- Phase 1 Foundation is complete ✓
+- AWSClient registered in factory with `ClusterProvider.AWS`
+- Credential validation working via `validate_credentials()`
+- Unit tests established with moto mocking
+- Files created: `gpustack/schemas/aws.py`, `gpustack/cloud_providers/aws.py`, `tests/cloud_providers/test_aws.py`
+- Files modified: `gpustack/schemas/clusters.py`, `gpustack/cloud_providers/common.py`, `pyproject.toml`
 
 ---
 
