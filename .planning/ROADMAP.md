@@ -107,11 +107,11 @@ Plans:
 4. Instance has identifying tags (Name, GPUStack-managed, etc.)
 5. System can terminate an instance by ID and it stops running in AWS
 
-**Plans:** 2 plans in 1 wave
+**Plans:** 2 plans in 1 wave ✓ **COMPLETE**
 
 Plans:
-- [ ] 03-01-PLAN.md — Deep Learning AMI mapping and create_instance implementation
-- [ ] 03-02-PLAN.md — delete_instance and get_instance with state mapping
+- [x] 03-01-PLAN.md — Deep Learning AMI mapping and create_instance implementation
+- [x] 03-02-PLAN.md — delete_instance and get_instance with state mapping
 
 ---
 
