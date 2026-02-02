@@ -990,7 +990,8 @@ class AWSClient(ProviderClientBase):
         """
         logger.debug("[AWSClient] Getting regions list")
 
-        async with self._get_client() as client:
+        client = await self._get_client()
+        async with client:
             response = await client.describe_regions()
 
             regions = []
@@ -1038,7 +1039,8 @@ class AWSClient(ProviderClientBase):
             {"Name": "root-device-type", "Values": ["ebs"]},
         ]
 
-        async with self._get_client() as client:
+        client = await self._get_client()
+        async with client:
             response = await client.describe_images(Owners=["amazon"], Filters=filters)
 
             images = []
@@ -1109,7 +1111,8 @@ class AWSClient(ProviderClientBase):
         else:
             filters = []
 
-        async with self._get_client() as client:
+        client = await self._get_client()
+        async with client:
             while True:
                 kwargs = {}
                 if filters:
