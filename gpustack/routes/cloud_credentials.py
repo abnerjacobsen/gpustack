@@ -208,7 +208,21 @@ async def proxy_cluster_provider_api(
     # Check if this is an AWS provider request - use aiobotocore for proper authentication
     if credential.provider == ClusterProvider.AWS:
         logger.debug("[AWS Provider Proxy] Using aiobotocore for AWS request")
-        return await _handle_aws_proxy(request, credential, path, options)
+        try:
+            return await _handle_aws_proxy(request, credential, path, options)
+        except Exception as e:
+            logger.error(f"[AWS Provider Proxy] Error in _handle_aws_proxy: {e}")
+            import traceback
+
+            logger.error(traceback.format_exc())
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "code": 500,
+                    "reason": "InternalError",
+                    "message": f"AWS proxy error: {str(e)}",
+                },
+            )
 
     # For non-AWS providers (DigitalOcean, etc.), use the generic proxy
     header_modifier = partial(
