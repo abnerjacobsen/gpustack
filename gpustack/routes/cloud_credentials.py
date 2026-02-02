@@ -1,12 +1,14 @@
 from urllib.parse import urljoin
 from functools import partial
+import xml.etree.ElementTree as ET
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 
 from gpustack.api.exceptions import (
     AlreadyExistsException,
     InternalServerErrorException,
     NotFoundException,
+    ErrorResponse,
 )
 from gpustack.server.deps import SessionDep
 from gpustack.schemas.clusters import (
@@ -22,6 +24,57 @@ from gpustack.cloud_providers.common import factory
 from gpustack.routes.proxy import proxy_to
 
 router = APIRouter()
+
+
+def _parse_aws_xml_error(content: bytes) -> tuple[str, str]:
+    """
+    Parse AWS XML error response and extract error code and message.
+
+    Args:
+        content: Raw XML response bytes from AWS
+
+    Returns:
+        Tuple of (error_code, error_message)
+    """
+    try:
+        root = ET.fromstring(content)
+        # AWS error responses have format:
+        # <Response><Errors><Error><Code>...</Code><Message>...</Message></Error></Errors>...</Response>
+        # or <ErrorResponse><Error><Code>...</Code><Message>...</Message></Error></ErrorResponse>
+
+        # Try Response/Errors/Error format first
+        errors = root.find(".//Errors/Error")
+        if errors is not None:
+            code = errors.find("Code")
+            message = errors.find("Message")
+            if code is not None and message is not None:
+                return code.text or "Unknown", message.text or "Unknown error"
+
+        # Try ErrorResponse/Error format
+        error = root.find(".//Error")
+        if error is not None:
+            code = error.find("Code")
+            message = error.find("Message")
+            if code is not None and message is not None:
+                return code.text or "Unknown", message.text or "Unknown error"
+
+        # Fallback: try to find any Code and Message elements
+        code = root.find(".//Code")
+        message = root.find(".//Message")
+        if code is not None and message is not None:
+            return code.text or "Unknown", message.text or "Unknown error"
+
+    except ET.ParseError:
+        pass
+
+    return "Unknown", "Unable to parse AWS error response"
+
+
+def _is_xml_content(content_type: str) -> bool:
+    """Check if content type indicates XML response."""
+    if not content_type:
+        return False
+    return "xml" in content_type.lower()
 
 
 @router.get("", response_model=CloudCredentialsPublic)
@@ -139,6 +192,35 @@ async def proxy_cluster_provider_api(
         provider[0].process_header, credential.key, credential.secret, options
     )
     response = await proxy_to(request, url, header_modifier)
+
+    # Check if the response is an XML error (AWS returns XML errors)
+    content_type = response.headers.get("Content-Type", "")
+    if _is_xml_content(content_type) and response.status_code >= 400:
+        # Parse AWS XML error and convert to JSON format
+        error_code, error_message = _parse_aws_xml_error(response.body)
+
+        # Map AWS error codes to appropriate HTTP status codes
+        status_code = response.status_code
+        if response.status_code in [401, 403]:
+            status_code = (
+                400  # Convert to Bad Request for consistency with DigitalOcean
+            )
+
+        # Return JSON error response following GPUStack format
+        error_response = ErrorResponse(
+            code=status_code,
+            reason=error_code,
+            message=error_message,
+        )
+        return JSONResponse(
+            status_code=status_code,
+            content=error_response.model_dump(),
+            headers={
+                "X-GPUStack-Original-Status": str(response.status_code),
+                "X-GPUStack-Original-Error-Code": error_code,
+            },
+        )
+
     if response.status_code in [401, 403, 404]:
         original_status = response.status_code
         response.status_code = 400
