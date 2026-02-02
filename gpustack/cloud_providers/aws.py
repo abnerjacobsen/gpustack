@@ -979,6 +979,199 @@ class AWSClient(ProviderClientBase):
             "construct_user_data implementation pending Phase 6 (Integration)"
         )
 
+    async def get_regions(self) -> List[dict]:
+        """List all AWS regions using aiobotocore.
+
+        Calls EC2 describe_regions() and returns a list of regions
+        in a format compatible with the frontend.
+
+        Returns:
+            List of region dictionaries with keys: slug, name, endpoint, opt_in_status
+        """
+        logger.debug("[AWSClient] Getting regions list")
+
+        async with self._get_client() as client:
+            response = await client.describe_regions()
+
+            regions = []
+            for region_data in response.get("Regions", []):
+                region_name = region_data.get("RegionName", "")
+                endpoint = region_data.get("Endpoint", "")
+                opt_in_status = region_data.get("OptInStatus", "opt-in-not-required")
+
+                regions.append(
+                    {
+                        "slug": region_name,
+                        "name": region_name,
+                        "endpoint": endpoint,
+                        "opt_in_status": opt_in_status,
+                        "available": opt_in_status == "opt-in-not-required",
+                    }
+                )
+
+            logger.info(f"[AWSClient] Retrieved {len(regions)} regions")
+            return regions
+
+    async def get_images(self, region: Optional[str] = None) -> List[dict]:
+        """List Deep Learning AMIs using aiobotocore.
+
+        Calls EC2 describe_images() with filters for AWS Deep Learning AMIs
+        and returns a list of images compatible with the frontend.
+
+        Args:
+            region: Optional region to filter. Uses client's region if not specified.
+
+        Returns:
+            List of image dictionaries with AMI details
+        """
+        target_region = region or self.region
+        logger.debug(
+            f"[AWSClient] Getting Deep Learning AMIs for region {target_region}"
+        )
+
+        # Filter for AWS Deep Learning AMIs (Ubuntu-based, GPU-enabled)
+        filters = [
+            {"Name": "name", "Values": ["Deep Learning AMI GPU *"]},
+            {"Name": "owner-alias", "Values": ["amazon"]},
+            {"Name": "architecture", "Values": ["x86_64"]},
+            {"Name": "virtualization-type", "Values": ["hvm"]},
+            {"Name": "root-device-type", "Values": ["ebs"]},
+        ]
+
+        async with self._get_client() as client:
+            response = await client.describe_images(Owners=["amazon"], Filters=filters)
+
+            images = []
+            for image_data in response.get("Images", []):
+                ami_id = image_data.get("ImageId", "")
+                name = image_data.get("Name", "")
+                description = image_data.get("Description", "")
+                created_at = image_data.get("CreationDate", "")
+
+                # Extract volume size from block device mappings
+                bd_mappings = image_data.get("BlockDeviceMappings", [])
+                size_gb = 100  # default
+                if bd_mappings:
+                    ebs = bd_mappings[0].get("Ebs", {})
+                    size_gb = ebs.get("VolumeSize", 100)
+
+                images.append(
+                    {
+                        "id": ami_id,
+                        "name": name,
+                        "description": description,
+                        "slug": ami_id,
+                        "distribution": "Ubuntu",
+                        "regions": [target_region],
+                        "created_at": created_at,
+                        "type": "snapshot",
+                        "min_disk_size": size_gb,
+                        "size_gigabytes": size_gb,
+                    }
+                )
+
+            logger.info(f"[AWSClient] Retrieved {len(images)} AMIs")
+            return images
+
+    async def get_instance_types(self, gpu_only: bool = True) -> List[dict]:
+        """List EC2 instance types using aiobotocore.
+
+        Calls EC2 describe_instance_types() and returns GPU-enabled
+        instance types (p3, p4d, g4dn, g5 families).
+
+        Args:
+            gpu_only: If True, only return GPU-enabled instance types
+
+        Returns:
+            List of instance type dictionaries with specs
+        """
+        logger.debug("[AWSClient] Getting instance types")
+
+        instance_types = []
+        next_token = None
+
+        # Build filters for GPU instance types
+        if gpu_only:
+            filters = [
+                {
+                    "Name": "instance-type",
+                    "Values": [
+                        "p3.*",
+                        "p3dn.*",  # Tesla V100
+                        "p4d.*",
+                        "p4de.*",  # A100
+                        "g4dn.*",  # T4
+                        "g5.*",
+                        "g5g.*",  # A10G / A100 (Graviton)
+                    ],
+                }
+            ]
+        else:
+            filters = []
+
+        async with self._get_client() as client:
+            while True:
+                kwargs = {}
+                if filters:
+                    kwargs["Filters"] = filters
+                if next_token:
+                    kwargs["NextToken"] = next_token
+
+                response = await client.describe_instance_types(**kwargs)
+
+                for it_data in response.get("InstanceTypes", []):
+                    instance_type = it_data.get("InstanceType", "")
+
+                    # Get GPU info
+                    gpu_info = it_data.get("GpuInfo", {})
+                    gpus = gpu_info.get("Gpus", [])
+                    total_gpu_memory = sum(
+                        gpu.get("MemoryInfo", {}).get("SizeInMiB", 0) for gpu in gpus
+                    )
+
+                    # Get vCPU and memory
+                    vcpu_info = it_data.get("VCpuInfo", {})
+                    vcpu_count = vcpu_info.get("DefaultVCpus", 0)
+
+                    memory_info = it_data.get("MemoryInfo", {})
+                    memory_mib = memory_info.get("SizeInMiB", 0)
+
+                    # Build description
+                    gpu_names = [gpu.get("Name", "Unknown") for gpu in gpus]
+                    description = f"{vcpu_count} vCPUs, {memory_mib / 1024:.1f} GB RAM"
+                    if gpus:
+                        description += f", {len(gpus)} GPU(s) ({', '.join(gpu_names)})"
+
+                    instance_types.append(
+                        {
+                            "slug": instance_type,
+                            "description": description,
+                            "available": True,
+                            "features": ["gpu", "nvidia"] if gpus else [],
+                            "gpu_info": (
+                                {
+                                    "gpu_count": len(gpus),
+                                    "gpu_memory_mib": total_gpu_memory,
+                                    "gpu_types": gpu_names,
+                                }
+                                if gpus
+                                else None
+                            ),
+                            "vcpu_count": vcpu_count,
+                            "memory_mib": memory_mib,
+                            "network_performance": it_data.get("NetworkInfo", {}).get(
+                                "NetworkPerformance", "Unknown"
+                            ),
+                        }
+                    )
+
+                next_token = response.get("NextToken")
+                if not next_token:
+                    break
+
+        logger.info(f"[AWSClient] Retrieved {len(instance_types)} instance types")
+        return instance_types
+
     @classmethod
     def get_api_endpoint(cls) -> str:
         """Get AWS EC2 API endpoint.

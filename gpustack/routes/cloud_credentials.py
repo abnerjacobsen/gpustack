@@ -205,11 +205,17 @@ async def proxy_cluster_provider_api(
     logger.debug(f"[AWS Provider Proxy] Region: {options.get('region', 'us-east-1')}")
     logger.debug(f"[AWS Provider Proxy] Options: {options}")
 
+    # Check if this is an AWS provider request - use aiobotocore for proper authentication
+    if credential.provider == ClusterProvider.AWS:
+        logger.debug("[AWS Provider Proxy] Using aiobotocore for AWS request")
+        return await _handle_aws_proxy(request, credential, path, options)
+
+    # For non-AWS providers (DigitalOcean, etc.), use the generic proxy
     header_modifier = partial(
         provider[0].process_header, credential.key, credential.secret, options
     )
 
-    logger.debug("[AWS Provider Proxy] Sending request to AWS API...")
+    logger.debug("[AWS Provider Proxy] Sending request via proxy_to...")
     response = await proxy_to(request, url, header_modifier)
 
     logger.debug(f"[AWS Provider Proxy] Response status: {response.status_code}")
@@ -253,3 +259,116 @@ async def proxy_cluster_provider_api(
         response.status_code = 400
         response.headers.append("X-GPUStack-Original-Status", str(original_status))
     return response
+
+
+# AWS proxy handler functions
+async def _handle_aws_proxy(
+    request: Request, credential: CloudCredential, path: str, options: dict
+) -> JSONResponse:
+    """Handle AWS-specific proxy requests using aiobotocore.
+
+    This function uses aiobotocore to make AWS API calls with proper
+    AWS Signature V4 authentication, avoiding the 401 AuthFailure errors
+    that occur when using generic HTTP proxy.
+
+    Args:
+        request: FastAPI Request object
+        credential: CloudCredential with AWS credentials
+        path: URL path (e.g., "aws/regions", "aws/images")
+        options: Additional options from credential (region, vpc, etc.)
+
+    Returns:
+        JSONResponse with AWS data
+    """
+    from gpustack.cloud_providers.aws import AWSClient
+    from botocore.exceptions import (
+        ClientError,
+        NoCredentialsError,
+        EndpointConnectionError,
+    )
+
+    region = options.get("region", "us-east-1")
+
+    logger.debug(f"[AWS aiobotocore] Initializing client for region {region}")
+
+    # Initialize AWSClient with aiobotocore
+    aws_client = AWSClient(
+        access_key=credential.key or "",
+        secret_key=credential.secret or "",
+        region=region,
+        config=None,
+    )
+
+    try:
+        # Route to specific endpoint handler
+        if path == "aws/regions":
+            logger.debug("[AWS aiobotocore] Calling get_regions()")
+            regions = await aws_client.get_regions()
+            result = {"regions": regions, "meta": {"total": len(regions)}}
+
+        elif path == "aws/images":
+            query_region = request.query_params.get("region", region)
+            logger.debug(f"[AWS aiobotocore] Calling get_images({query_region})")
+            images = await aws_client.get_images(region=query_region)
+            result = {"images": images, "meta": {"total": len(images)}}
+
+        elif path == "aws/instance-types":
+            logger.debug("[AWS aiobotocore] Calling get_instance_types()")
+            instance_types = await aws_client.get_instance_types(gpu_only=True)
+            result = {
+                "instance_types": instance_types,
+                "meta": {"total": len(instance_types)},
+            }
+
+        else:
+            logger.warning(f"[AWS aiobotocore] Unknown endpoint: {path}")
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "code": 404,
+                    "reason": "NotFound",
+                    "message": f"Unknown AWS endpoint: {path}",
+                },
+            )
+
+        logger.debug(f"[AWS aiobotocore] Success: {path}")
+        return JSONResponse(status_code=200, content=result)
+
+    except ClientError as e:
+        error_code = e.response["Error"]["Code"]
+        error_msg = e.response["Error"]["Message"]
+        logger.error(f"[AWS aiobotocore] ClientError: {error_code}")
+        return JSONResponse(
+            status_code=400,
+            content={"code": 400, "reason": error_code, "message": error_msg},
+            headers={"X-GPUStack-Original-Error-Code": error_code},
+        )
+
+    except NoCredentialsError:
+        logger.error("[AWS aiobotocore] No credentials")
+        return JSONResponse(
+            status_code=400,
+            content={
+                "code": 400,
+                "reason": "InvalidCredentials",
+                "message": "AWS credentials are missing",
+            },
+        )
+
+    except EndpointConnectionError as e:
+        logger.error(f"[AWS aiobotocore] Connection error: {e}")
+        return JSONResponse(
+            status_code=400,
+            content={
+                "code": 400,
+                "reason": "ConnectionError",
+                "message": "Cannot connect to AWS",
+            },
+        )
+
+    except Exception as e:
+        logger.error(f"[AWS aiobotocore] Unexpected error: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"code": 500, "reason": "InternalError", "message": str(e)},
+        )
