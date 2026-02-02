@@ -1,6 +1,7 @@
 from urllib.parse import urljoin
 from functools import partial
 import xml.etree.ElementTree as ET
+import logging
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 
@@ -24,6 +25,7 @@ from gpustack.cloud_providers.common import factory
 from gpustack.routes.proxy import proxy_to
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _parse_aws_xml_error(content: bytes) -> tuple[str, str]:
@@ -182,16 +184,41 @@ async def proxy_cluster_provider_api(
     provider = factory.get(credential.provider, None)
     if provider is None:
         raise NotFoundException(message=f"Provider {credential.provider} not found")
+
     url = urljoin(provider[0].get_api_endpoint(), path)
     if request.query_params:
         url = f"{url}?{str(request.query_params)}"
+
     options = {
         **(credential.options or {}),
     }
+
+    # Log debug information for AWS calls
+    logger.debug(
+        f"[AWS Provider Proxy] Credential ID: {id}, Provider: {credential.provider}"
+    )
+    logger.debug(f"[AWS Provider Proxy] Request path: {path}")
+    logger.debug(f"[AWS Provider Proxy] Full URL: {url}")
+    logger.debug(
+        f"[AWS Provider Proxy] Credential key (first 10 chars): {credential.key[:10] if credential.key else 'None'}..."
+    )
+    logger.debug(f"[AWS Provider Proxy] Region: {options.get('region', 'us-east-1')}")
+    logger.debug(f"[AWS Provider Proxy] Options: {options}")
+
     header_modifier = partial(
         provider[0].process_header, credential.key, credential.secret, options
     )
+
+    logger.debug("[AWS Provider Proxy] Sending request to AWS API...")
     response = await proxy_to(request, url, header_modifier)
+
+    logger.debug(f"[AWS Provider Proxy] Response status: {response.status_code}")
+    logger.debug(
+        f"[AWS Provider Proxy] Response content-type: {response.headers.get('Content-Type', 'unknown')}"
+    )
+    logger.debug(
+        f"[AWS Provider Proxy] Response body preview (first 500 chars): {response.body[:500] if response.body else 'empty'}"
+    )
 
     # Check if the response is an XML error (AWS returns XML errors)
     content_type = response.headers.get("Content-Type", "")

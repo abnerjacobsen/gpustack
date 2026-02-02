@@ -63,7 +63,6 @@ def hf_token_process(url: str, headers: dict) -> dict:
 
 @router.api_route("", methods=["GET", "POST", "PUT", "DELETE"])
 async def proxy(request: Request, url: str):
-
     validate_http_method(request.method)
     validate_url(url)
 
@@ -77,6 +76,11 @@ async def proxy_to(
     forwarded_headers = process_headers(request.headers)
     if header_func is not None:
         forwarded_headers = header_func(forwarded_headers)
+
+    # Log the outgoing request details
+    logger.debug(f"[Proxy] {request.method} {url}")
+    logger.debug(f"[Proxy] Headers: {dict(forwarded_headers)}")
+
     try:
         data = (
             await request.body()
@@ -100,6 +104,16 @@ async def proxy_to(
                     for k, v in resp.headers.items()
                     if k.lower() not in HEADER_SKIPPED
                 }
+
+                # Log the response details
+                logger.debug(f"[Proxy] Response status: {resp.status}")
+                logger.debug(f"[Proxy] Response headers: {dict(headers)}")
+                logger.debug(f"[Proxy] Response body length: {len(content)} bytes")
+                if len(content) < 1000:  # Only log small responses
+                    logger.debug(
+                        f"[Proxy] Response body: {content.decode('utf-8', errors='replace')[:500]}"
+                    )
+
                 return Response(
                     status_code=resp.status,
                     content=content,
@@ -107,6 +121,7 @@ async def proxy_to(
                     media_type=headers.get("Content-Type"),
                 )
     except Exception as e:
+        logger.error(f"[Proxy] Request failed: {e}")
         return JSONResponse(
             status_code=500,
             content={"detail": str(e)},
