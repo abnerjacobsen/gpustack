@@ -991,8 +991,8 @@ class AWSClient(ProviderClientBase):
         logger.debug("[AWSClient] Getting regions list")
 
         client = await self._get_client()
-        async with client:
-            response = await client.describe_regions()
+        async with client as ec2:
+            response = await ec2.describe_regions()
 
             regions = []
             for region_data in response.get("Regions", []):
@@ -1040,8 +1040,8 @@ class AWSClient(ProviderClientBase):
         ]
 
         client = await self._get_client()
-        async with client:
-            response = await client.describe_images(Owners=["amazon"], Filters=filters)
+        async with client as ec2:
+            response = await ec2.describe_images(Owners=["amazon"], Filters=filters)
 
             images = []
             for image_data in response.get("Images", []):
@@ -1112,7 +1112,7 @@ class AWSClient(ProviderClientBase):
             filters = []
 
         client = await self._get_client()
-        async with client:
+        async with client as ec2:
             while True:
                 kwargs = {}
                 if filters:
@@ -1120,7 +1120,7 @@ class AWSClient(ProviderClientBase):
                 if next_token:
                     kwargs["NextToken"] = next_token
 
-                response = await client.describe_instance_types(**kwargs)
+                response = await ec2.describe_instance_types(**kwargs)
 
                 for it_data in response.get("InstanceTypes", []):
                     instance_type = it_data.get("InstanceType", "")
