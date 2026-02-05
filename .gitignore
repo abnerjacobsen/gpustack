@@ -167,4 +167,4 @@ kubeconfiggit diff --name-only upstream/main...feat/add-aws-cloud-provider
 
 # Others
 .claude
-data/
+data
