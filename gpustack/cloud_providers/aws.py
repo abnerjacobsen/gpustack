@@ -216,8 +216,10 @@ class AWSClient(ProviderClientBase):
             >>> print(instance_id)
             i-0abcd1234efgh5678i
         """
-        # Get AMI ID for the region (Deep Learning AMI with GPU support)
-        ami_id = get_ami_for_region(instance.region)
+        # Use AMI selected by user (from frontend), or fallback to region mapping if not provided
+        ami_id = (
+            instance.image if instance.image else get_ami_for_region(instance.region)
+        )
 
         # Build base run_instances arguments
         run_args = {

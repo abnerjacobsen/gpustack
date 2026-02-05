@@ -1,21 +1,22 @@
-"""Deep Learning AMI mapping for AWS EC2 GPU instances.
+"""NVIDIA GPU Cloud VMI AMI mapping for AWS EC2 GPU instances.
 
-This module provides region-specific AMI mappings for AWS Deep Learning AMIs,
+This module provides region-specific AMI mappings for NVIDIA GPU Cloud VMIs,
 enabling GPUStack workers to launch EC2 instances with pre-installed NVIDIA
 drivers, CUDA toolkit, and container support.
 
-The Deep Learning AMI (DLAMI) is optimized for machine learning and provides:
+The NVIDIA GPU Cloud VMI provides:
 - Pre-installed NVIDIA GPU drivers
 - CUDA toolkit
 - NVIDIA Container Toolkit (nvidia-docker)
 - Docker runtime configured for GPU workloads
+- Optimized for ML/AI workloads
 
 AMI Update Process:
 -------------------
 AMI IDs change frequently as AWS releases updated images. To update:
-1. Find latest DLAMI: aws ec2 describe-images \
-       --owners amazon \
-       --filters "Name=name,Values=Deep Learning OSS Nvidia Driver AMI GPU PyTorch 2.3.* (Ubuntu 22.04) *" \
+1. Find latest NVIDIA GPU Cloud VMI: aws ec2 describe-images \
+       --owners 492681118881 \
+       --filters "Name=name,Values=NVIDIA GPU Cloud VMI Base*" \
        --query 'Images[*].[ImageId,Name,CreationDate]' \
        --region <region> \
        --output table
@@ -23,25 +24,26 @@ AMI IDs change frequently as AWS releases updated images. To update:
 3. Test with actual EC2 instance launch
 
 Note: For production use, consider using AWS Systems Manager Parameter Store
-to dynamically query the latest DLAMI ID instead of static mappings.
+to dynamically query the latest AMI ID instead of static mappings.
 """
 
 import logging
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-# Deep Learning AMI GPU PyTorch 2.3 (Ubuntu 22.04) - x86_64 architecture
-# Last updated: 2026-01-31
+# NVIDIA GPU Cloud VMI Base - x86_64 architecture
+# Last updated: 2026-02-05
 # AMI IDs are region-specific and subject to change
+# Using ami-0c9d542b483c971a0 (NVIDIA GPU Cloud VMI Base 2025.9.1 x86_64) for us-east-1
 DLAMI_MAPPING: Dict[str, Dict[str, str]] = {
-    "us-east-1": {"x86_64": "ami-0a1b2c3d4e5f67890"},
-    "us-east-2": {"x86_64": "ami-0b2c3d4e5f6789012"},
-    "us-west-1": {"x86_64": "ami-0c3d4e5f678901234"},
-    "us-west-2": {"x86_64": "ami-0d4e5f67890123456"},
-    "eu-west-1": {"x86_64": "ami-0e5f6789012345678"},
-    "eu-central-1": {"x86_64": "ami-0f678901234567890"},
-    "ap-southeast-1": {"x86_64": "ami-0a78901234567890b"},
+    "us-east-1": {"x86_64": "ami-0c9d542b483c971a0"},
+    "us-east-2": {"x86_64": "ami-0c9d542b483c971a0"},
+    "us-west-1": {"x86_64": "ami-0c9d542b483c971a0"},
+    "us-west-2": {"x86_64": "ami-0c9d542b483c971a0"},
+    "eu-west-1": {"x86_64": "ami-0c9d542b483c971a0"},
+    "eu-central-1": {"x86_64": "ami-0c9d542b483c971a0"},
+    "ap-southeast-1": {"x86_64": "ami-0c9d542b483c971a0"},
 }
 
 # Supported GPU instance families for GPUStack
