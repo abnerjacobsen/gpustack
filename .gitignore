@@ -163,7 +163,8 @@ __pycache__/
 .DS_Store
 
 # kubernetes config
-kubeconfig
+kubeconfiggit diff --name-only upstream/main...feat/add-aws-cloud-provider  
 
 # Others
 .claude
+data/
