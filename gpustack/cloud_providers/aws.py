@@ -978,13 +978,31 @@ class AWSClient(ProviderClientBase):
 
         Returns:
             UserDataTemplate for EC2 user data
-
-        Raises:
-            NotImplementedError: Full implementation in Phase 6
         """
-        raise NotImplementedError(
-            "construct_user_data implementation pending Phase 6 (Integration)"
+        from gpustack_runtime.detector import ManufacturerEnum
+
+        # Create base user data from parent class
+        user_data = await super().construct_user_data(
+            server_url, token, image_name, os_image, secret_configs
         )
+
+        # Set distribution - Deep Learning AMIs are Ubuntu-based
+        user_data.distribution = "ubuntu"
+
+        # For Deep Learning AMIs, NVIDIA drivers are pre-installed
+        # We just need to set up the driver configuration
+        user_data.setup_driver = ManufacturerEnum.NVIDIA
+        user_data.install_driver = None  # Drivers already installed in DLAMI
+
+        # Add AWS-specific metadata commands
+        # AWS EC2 metadata service: http://169.254.169.254/latest/meta-data/
+        user_data.insert_runcmd(
+            "mkdir -p /var/lib/gpustack",
+            "curl -s http://169.254.169.254/latest/meta-data/instance-id > /var/lib/gpustack/external_id",
+            'ip=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4); if [ -n "$ip" ]; then echo "$ip" > /var/lib/gpustack/advertise_address; fi',
+        )
+
+        return user_data
 
     async def get_regions(self) -> List[dict]:
         """List all AWS regions using aiobotocore.
