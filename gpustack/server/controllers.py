@@ -45,6 +45,7 @@ from gpustack.schemas.workers import (
     Worker,
     WorkerStateEnum,
     WorkerStatus,
+    SystemReserved,
 )
 from gpustack.schemas.clusters import (
     Cluster,
@@ -216,7 +217,7 @@ async def sync_replicas(session: AsyncSession, model: Model):
     instances = await ModelInstance.all_by_field(session, "model_id", model.id)
     if len(instances) < model.replicas:
         for _ in range(model.replicas - len(instances)):
-            name_prefix = ''.join(
+            name_prefix = "".join(
                 random.choices(string.ascii_letters + string.digits, k=5)
             )
             instance = ModelInstanceCreate(
@@ -923,36 +924,36 @@ class InferenceBackendController:
         backend_data["enabled"] = False
 
         # Convert version_configs to VersionConfigDict
-        if 'version_configs' in backend_data and backend_data['version_configs']:
+        if "version_configs" in backend_data and backend_data["version_configs"]:
             version_config_dict = {}
-            for version, ver_config in backend_data['version_configs'].items():
+            for version, ver_config in backend_data["version_configs"].items():
                 # All versions loaded from YAML are predefined versions
                 # Convert framework information to built_in_frameworks
 
                 frameworks = None
-                if 'built_in_frameworks' in ver_config:
-                    frameworks = ver_config['built_in_frameworks']
+                if "built_in_frameworks" in ver_config:
+                    frameworks = ver_config["built_in_frameworks"]
                 elif (
-                    'custom_framework' in ver_config and ver_config['custom_framework']
+                    "custom_framework" in ver_config and ver_config["custom_framework"]
                 ):
                     # Even if YAML uses custom_framework, convert it to built_in_frameworks
-                    frameworks = [ver_config['custom_framework']]
+                    frameworks = [ver_config["custom_framework"]]
 
                 # Set built_in_frameworks and clear custom_framework
                 if frameworks:
-                    ver_config['built_in_frameworks'] = (
+                    ver_config["built_in_frameworks"] = (
                         frameworks if isinstance(frameworks, list) else [frameworks]
                     )
                 else:
                     # If no framework specified, use empty list to mark as predefined version
-                    ver_config['built_in_frameworks'] = []
+                    ver_config["built_in_frameworks"] = []
 
                 # Ensure custom_framework is None (predefined versions should not have custom_framework)
-                ver_config['custom_framework'] = None
+                ver_config["custom_framework"] = None
 
                 version_config_dict[version] = VersionConfig(**ver_config)
 
-            backend_data['version_configs'] = VersionConfigDict(
+            backend_data["version_configs"] = VersionConfigDict(
                 root=version_config_dict
             )
 
@@ -964,8 +965,8 @@ class InferenceBackendController:
             # Smart merge logic to preserve user customizations
 
             # 1. Merge version_configs: preserve user custom versions, update YAML versions
-            if 'version_configs' in backend_data and backend_data['version_configs']:
-                yaml_versions = backend_data['version_configs'].root
+            if "version_configs" in backend_data and backend_data["version_configs"]:
+                yaml_versions = backend_data["version_configs"].root
                 existing_versions = (
                     existing.version_configs.root if existing.version_configs else {}
                 )
@@ -986,24 +987,24 @@ class InferenceBackendController:
                         # This is a user custom version not in YAML, preserve it
                         merged_versions[version] = config
 
-                backend_data['version_configs'] = VersionConfigDict(
+                backend_data["version_configs"] = VersionConfigDict(
                     root=merged_versions
                 )
 
             # 2. Preserve user-modified enabled status (if user enabled it, don't reset to False)
             if existing.enabled:
-                backend_data['enabled'] = True
+                backend_data["enabled"] = True
 
             # 3. Merge default_env (preserve user-added environment variables)
             if existing.default_env:
-                if 'default_env' in backend_data and backend_data['default_env']:
+                if "default_env" in backend_data and backend_data["default_env"]:
                     # Merge: YAML environment variables + user-added environment variables
                     merged_env = dict(existing.default_env)
-                    merged_env.update(backend_data['default_env'])
-                    backend_data['default_env'] = merged_env
+                    merged_env.update(backend_data["default_env"])
+                    backend_data["default_env"] = merged_env
                 else:
                     # YAML doesn't define it, preserve user's
-                    backend_data['default_env'] = existing.default_env
+                    backend_data["default_env"] = existing.default_env
 
             # 4. Update database
             await existing.update(session, backend_data)
@@ -1308,7 +1309,7 @@ async def new_workers_from_pool(
             worker_pool=pool,
             provider=pool.cluster.provider,
             name=f"pool-{pool.id}-"
-            + ''.join(random.choices(string.ascii_lowercase + string.digits, k=8)),
+            + "".join(random.choices(string.ascii_lowercase + string.digits, k=8)),
             labels={
                 "provider": pool.cluster.provider.value,
                 "instance_type": pool.instance_type or "unknown",
@@ -1316,6 +1317,7 @@ async def new_workers_from_pool(
             },
             state=WorkerStateEnum.PENDING,
             status=WorkerStatus.get_default_status(),
+            system_reserved=SystemReserved(ram=0, vram=0),
         )
         new_workers.append(new_worker)
     return new_workers
