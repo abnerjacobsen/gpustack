@@ -1032,7 +1032,7 @@ class AWSClient(ProviderClientBase):
 
         # Filter for AWS Deep Learning AMIs (Ubuntu-based, GPU-enabled)
         filters = [
-            {"Name": "name", "Values": ["Deep Learning AMI GPU *"]},
+            {"Name": "name", "Values": ["*Deep Learning*"]},
             {"Name": "owner-alias", "Values": ["amazon"]},
             {"Name": "architecture", "Values": ["x86_64"]},
             {"Name": "virtualization-type", "Values": ["hvm"]},
@@ -1098,13 +1098,24 @@ class AWSClient(ProviderClientBase):
                 {
                     "Name": "instance-type",
                     "Values": [
-                        "p3.*",
-                        "p3dn.*",  # Tesla V100
-                        "p4d.*",
-                        "p4de.*",  # A100
-                        "g4dn.*",  # T4
-                        "g5.*",
-                        "g5g.*",  # A10G / A100 (Graviton)
+                        # "p3.*",
+                        # "p3dn.*",  # Tesla V100
+                        # "p4d.*",
+                        # "p4de.*",  # A100
+                        # "g4dn.*",  # T4
+                        # "g4ad.*",  # AMD
+                        # "g5.*",
+                        # "g5g.*",  # A10G / A100 (Graviton)
+                        # "g6.*",
+                        # "g6e.*",
+                        "g7.*",
+                        "g7e.*",
+                        "p6e.*",
+                        "p6.*",
+                        "p5.*",
+                        "p5e.*",
+                        "p5en.*",
+                        "gr6.*",
                     ],
                 }
             ]
@@ -1127,10 +1138,38 @@ class AWSClient(ProviderClientBase):
 
                     # Get GPU info
                     gpu_info = it_data.get("GpuInfo", {})
-                    gpus = gpu_info.get("Gpus", [])
-                    total_gpu_memory = sum(
-                        gpu.get("MemoryInfo", {}).get("SizeInMiB", 0) for gpu in gpus
-                    )
+                    gpus_list = gpu_info.get("Gpus", [])
+
+                    # Log raw GPU data for debugging
+                    if gpus_list:
+                        logger.debug(
+                            f"[AWSClient] Processing {instance_type}: GpuInfo={gpu_info}"
+                        )
+
+                    # Calculate total GPU count and memory correctly
+                    # Each GPU entry has a "Count" field indicating how many of that type
+                    total_gpu_count = 0
+                    total_gpu_memory = 0
+                    gpu_names = []
+                    gpu_manufacturers = set()
+
+                    for gpu in gpus_list:
+                        count = gpu.get("Count", 1)  # Use Count field (default 1)
+                        memory_per_gpu = gpu.get("MemoryInfo", {}).get("SizeInMiB", 0)
+                        gpu_name = gpu.get("Name", "Unknown")
+                        manufacturer = gpu.get("Manufacturer", "Unknown")
+
+                        total_gpu_count += count
+                        total_gpu_memory += count * memory_per_gpu
+                        gpu_names.append(gpu_name)
+                        gpu_manufacturers.add(manufacturer)
+
+                    # Use TotalGpuMemoryInMiB if available (more accurate)
+                    if "TotalGpuMemoryInMiB" in gpu_info:
+                        total_gpu_memory = gpu_info["TotalGpuMemoryInMiB"]
+                        logger.debug(
+                            f"[AWSClient] Using TotalGpuMemoryInMiB: {total_gpu_memory}"
+                        )
 
                     # Get vCPU and memory
                     vcpu_info = it_data.get("VCpuInfo", {})
@@ -1139,25 +1178,28 @@ class AWSClient(ProviderClientBase):
                     memory_info = it_data.get("MemoryInfo", {})
                     memory_mib = memory_info.get("SizeInMiB", 0)
 
-                    # Build description
-                    gpu_names = [gpu.get("Name", "Unknown") for gpu in gpus]
+                    # Build description with correct GPU count
                     description = f"{vcpu_count} vCPUs, {memory_mib / 1024:.1f} GB RAM"
-                    if gpus:
-                        description += f", {len(gpus)} GPU(s) ({', '.join(gpu_names)})"
+                    if total_gpu_count > 0:
+                        description += (
+                            f", {total_gpu_count} GPU(s) ({', '.join(set(gpu_names))})"
+                        )
 
                     instance_types.append(
                         {
                             "slug": instance_type,
                             "description": description,
                             "available": True,
-                            "features": ["gpu", "nvidia"] if gpus else [],
+                            "features": (
+                                ["gpu", "nvidia"] if total_gpu_count > 0 else []
+                            ),
                             "gpu_info": (
                                 {
-                                    "gpu_count": len(gpus),
+                                    "gpu_count": total_gpu_count,
                                     "gpu_memory_mib": total_gpu_memory,
-                                    "gpu_types": gpu_names,
+                                    "gpu_types": list(set(gpu_names)),
                                 }
-                                if gpus
+                                if total_gpu_count > 0
                                 else None
                             ),
                             "vcpu_count": vcpu_count,
