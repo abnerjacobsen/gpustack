@@ -239,7 +239,7 @@ class AWSClient(ProviderClientBase):
         # Add custom labels as tags if provided
         if instance.labels:
             for key, value in instance.labels.items():
-                base_tags.append({"Key": key, "Value": value})
+                base_tags.append({"Key": key, "Value": str(value)})
 
         run_args["TagSpecifications"] = [
             {"ResourceType": "instance", "Tags": base_tags}
@@ -1057,8 +1057,8 @@ class AWSClient(ProviderClientBase):
 
         # Filter for AWS Deep Learning AMIs (Ubuntu-based, GPU-enabled)
         filters = [
-            {"Name": "name", "Values": ["*Ubuntu 24.04*"]},
-            {"Name": "owner-alias", "Values": ["amazon"]},
+            {"Name": "description", "Values": ["*NVIDIA GPU Cloud VMI Base*"]},
+            # {"Name": "owner-alias", "Values": ["nvidia"]},
             {"Name": "architecture", "Values": ["x86_64"]},
             {"Name": "virtualization-type", "Values": ["hvm"]},
             {"Name": "root-device-type", "Values": ["ebs"]},
@@ -1066,7 +1066,8 @@ class AWSClient(ProviderClientBase):
 
         client = await self._get_client()
         async with client as ec2:
-            response = await ec2.describe_images(Owners=["amazon"], Filters=filters)
+            # response = await ec2.describe_images(Owners=["amazon"], Filters=filters)
+            response = await ec2.describe_images(Filters=filters)
 
             images = []
             for image_data in response.get("Images", []):
