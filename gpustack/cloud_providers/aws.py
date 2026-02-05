@@ -158,8 +158,9 @@ class AWSClient(ProviderClientBase):
             RuntimeError: If credentials are invalid or API call fails
         """
         try:
-            async with self._get_client() as client:
-                response = await client.describe_regions(RegionNames=[self.region])
+            client = await self._get_client()
+            async with client as ec2:
+                response = await ec2.describe_regions(RegionNames=[self.region])
                 if response.get("Regions"):
                     logger.info(f"AWS credentials validated for region {self.region}")
                     return True
@@ -264,9 +265,10 @@ class AWSClient(ProviderClientBase):
                 run_args["SecurityGroupIds"] = [self.config.security_group_id]
 
         # Launch the EC2 instance
-        async with self._get_client() as client:
+        client = await self._get_client()
+        async with client as ec2:
             try:
-                response = await client.run_instances(**run_args)
+                response = await ec2.run_instances(**run_args)
                 instance_id = response["Instances"][0]["InstanceId"]
                 logger.info(
                     f"Created EC2 instance {instance_id} of type {instance.type} "
@@ -347,9 +349,10 @@ class AWSClient(ProviderClientBase):
             This method is idempotent - if the instance is already terminated
             or does not exist, it logs a warning and returns successfully.
         """
-        async with self._get_client() as client:
+        client = await self._get_client()
+        async with client as ec2:
             try:
-                await client.terminate_instances(InstanceIds=[external_id])
+                await ec2.terminate_instances(InstanceIds=[external_id])
                 logger.info(f"Terminated EC2 instance {external_id}")
             except ClientError as e:
                 error_code = e.response["Error"]["Code"]
@@ -375,9 +378,10 @@ class AWSClient(ProviderClientBase):
         Returns:
             CloudInstance with current state and details, or None if not found
         """
-        async with self._get_client() as client:
+        client = await self._get_client()
+        async with client as ec2:
             try:
-                response = await client.describe_instances(InstanceIds=[external_id])
+                response = await ec2.describe_instances(InstanceIds=[external_id])
                 reservations = response.get("Reservations", [])
                 if not reservations:
                     return None
@@ -559,9 +563,10 @@ class AWSClient(ProviderClientBase):
         suffix = secrets.token_hex(4)  # 8-character hex suffix
         key_name = f"gpustack-{worker_name}-{suffix}"
 
-        async with self._get_client() as client:
+        client = await self._get_client()
+        async with client as ec2:
             # Check if key already exists to prevent duplicate errors
-            exists, fingerprint = await self._check_key_exists(client, key_name)
+            exists, fingerprint = await self._check_key_exists(ec2, key_name)
             if exists:
                 raise RuntimeError(
                     f"Key pair '{key_name}' already exists in AWS. "
@@ -571,7 +576,7 @@ class AWSClient(ProviderClientBase):
 
             # Import the public key
             try:
-                response = await client.import_key_pair(
+                response = await ec2.import_key_pair(
                     KeyName=key_name,
                     PublicKeyMaterial=public_key.encode("utf-8"),
                     TagSpecifications=[
@@ -615,9 +620,10 @@ class AWSClient(ProviderClientBase):
             This method is idempotent - if the key doesn't exist,
             it logs a warning and returns successfully.
         """
-        async with self._get_client() as client:
+        client = await self._get_client()
+        async with client as ec2:
             try:
-                await client.delete_key_pair(KeyName=id)
+                await ec2.delete_key_pair(KeyName=id)
                 logger.info(f"Deleted SSH key pair '{id}' from AWS")
             except ClientError as e:
                 if e.response["Error"]["Code"] == "InvalidKeyPair.NotFound":
@@ -899,9 +905,10 @@ class AWSClient(ProviderClientBase):
         volume_ids = []
         created_volumes = []  # Track for cleanup on failure
 
-        async with self._get_client() as client:
+        client = await self._get_client()
+        async with client as ec2:
             # Step 1: Get the instance's Availability Zone
-            az = await self._get_instance_az(client, external_id)
+            az = await self._get_instance_az(ec2, external_id)
             logger.info(f"Instance {external_id} is in AZ {az}, creating volumes there")
 
             # Step 2: Validate all volumes first
@@ -1032,7 +1039,7 @@ class AWSClient(ProviderClientBase):
 
         # Filter for AWS Deep Learning AMIs (Ubuntu-based, GPU-enabled)
         filters = [
-            {"Name": "name", "Values": ["*Deep Learning*"]},
+            {"Name": "name", "Values": ["*Ubuntu 24.04*"]},
             {"Name": "owner-alias", "Values": ["amazon"]},
             {"Name": "architecture", "Values": ["x86_64"]},
             {"Name": "virtualization-type", "Values": ["hvm"]},
@@ -1045,6 +1052,7 @@ class AWSClient(ProviderClientBase):
 
             images = []
             for image_data in response.get("Images", []):
+                logger.debug(f"IMAGE_DATA: {image_data}")
                 ami_id = image_data.get("ImageId", "")
                 name = image_data.get("Name", "")
                 description = image_data.get("Description", "")
@@ -1098,16 +1106,16 @@ class AWSClient(ProviderClientBase):
                 {
                     "Name": "instance-type",
                     "Values": [
-                        # "p3.*",
-                        # "p3dn.*",  # Tesla V100
-                        # "p4d.*",
-                        # "p4de.*",  # A100
-                        # "g4dn.*",  # T4
-                        # "g4ad.*",  # AMD
-                        # "g5.*",
-                        # "g5g.*",  # A10G / A100 (Graviton)
-                        # "g6.*",
-                        # "g6e.*",
+                        "p3.*",
+                        "p3dn.*",  # Tesla V100
+                        "p4d.*",
+                        "p4de.*",  # A100
+                        "g4dn.*",  # T4
+                        "g4ad.*",  # AMD
+                        "g5.*",
+                        "g5g.*",  # A10G / A100 (Graviton)
+                        "g6.*",
+                        "g6e.*",
                         "g7.*",
                         "g7e.*",
                         "p6e.*",
@@ -1167,9 +1175,6 @@ class AWSClient(ProviderClientBase):
                     # Use TotalGpuMemoryInMiB if available (more accurate)
                     if "TotalGpuMemoryInMiB" in gpu_info:
                         total_gpu_memory = gpu_info["TotalGpuMemoryInMiB"]
-                        logger.debug(
-                            f"[AWSClient] Using TotalGpuMemoryInMiB: {total_gpu_memory}"
-                        )
 
                     # Get vCPU and memory
                     vcpu_info = it_data.get("VCpuInfo", {})
