@@ -106,7 +106,7 @@ class WorkerManager:
         external_id_path = os.path.join(self._cfg.data_dir, 'external_id')
         if os.path.exists(external_id_path):
             with open(os.path.join(self._cfg.data_dir, 'external_id'), 'r') as f:
-                external_id = f.read()
+                external_id = f.read().rstrip('\r\n')
 
         @time_decorator
         def timed_collect():
