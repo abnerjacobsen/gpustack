@@ -998,10 +998,31 @@ class AWSClient(ProviderClientBase):
 
         # Add AWS-specific metadata commands
         # AWS EC2 metadata service: http://169.254.169.254/latest/meta-data/
+        # user_data.insert_runcmd(
+        #     "mkdir -p /var/lib/gpustack",
+        #     "INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)",
+        #     'echo "Instance ID (curl): $INSTANCE_ID"',
+        #     "curl -s http://169.254.169.254/latest/meta-data/instance-id > /var/lib/gpustack/external_id",
+        #     'ip=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4); if [ -n "$ip" ]; then echo "$ip" > /var/lib/gpustack/advertise_address; fi',
+        # )
         user_data.insert_runcmd(
+            "set -e",
+            'echo "[gpustack][metadata] Retrieving EC2 metadata..."',
             "mkdir -p /var/lib/gpustack",
-            "curl -s http://169.254.169.254/latest/meta-data/instance-id > /var/lib/gpustack/external_id",
-            'ip=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4); if [ -n "$ip" ]; then echo "$ip" > /var/lib/gpustack/advertise_address; fi',
+            'METADATA_BASE="http://169.254.169.254/latest/meta-data"',
+            'TOKEN_ENDPOINT="http://169.254.169.254/latest/api/token"',
+            'INSTANCE_ID=""',
+            'PUBLIC_IP=""',
+            'METADATA_METHOD=""',
+            # --- Try IMDSv2 ---
+            'echo "[gpustack][metadata] Trying IMDSv2..."',
+            'TOKEN=$(curl -s -X PUT "$TOKEN_ENDPOINT" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)',
+            'if [ -n "$TOKEN" ]; then INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" "$METADATA_BASE/instance-id" || true); PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" "$METADATA_BASE/public-ipv4" || true); if [ -n "$INSTANCE_ID" ]; then METADATA_METHOD="IMDSv2"; echo "[gpustack][metadata] IMDSv2 successful"; else echo "[gpustack][metadata] IMDSv2 token acquired but metadata unavailable"; fi; else echo "[gpustack][metadata] IMDSv2 token request failed"; fi',
+            # --- Fallback to IMDSv1 ---
+            'if [ -z "$INSTANCE_ID" ]; then echo "[gpustack][metadata] Falling back to IMDSv1..."; INSTANCE_ID=$(curl -s "$METADATA_BASE/instance-id" || true); PUBLIC_IP=$(curl -s "$METADATA_BASE/public-ipv4" || true); if [ -n "$INSTANCE_ID" ]; then METADATA_METHOD="IMDSv1"; echo "[gpustack][metadata] IMDSv1 successful"; else echo "[gpustack][metadata] IMDSv1 failed"; fi; fi',
+            # --- Persist results ---
+            'if [ -n "$INSTANCE_ID" ]; then printf "%s" "$INSTANCE_ID" > /var/lib/gpustack/external_id; echo "[gpustack][metadata] external_id set to EC2 instance-id ($METADATA_METHOD): $INSTANCE_ID"; else echo "[gpustack][metadata][ERROR] Failed to retrieve EC2 instance-id via IMDSv1 or IMDSv2" >&2; fi',
+            'if [ -n "$PUBLIC_IP" ]; then printf "%s" "$PUBLIC_IP" > /var/lib/gpustack/advertise_address; echo "[gpustack][metadata] advertise_address set to public-ipv4 ($METADATA_METHOD): $PUBLIC_IP"; else echo "[gpustack][metadata] public-ipv4 not available"; fi',
         )
 
         return user_data
