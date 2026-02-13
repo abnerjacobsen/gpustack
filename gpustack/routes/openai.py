@@ -134,7 +134,8 @@ async def proxy_request_by_model(
             is_openai_exception=True,
         )
 
-    url = f"http://{instance.worker_ip}:{worker.port}/proxy/v1/{endpoint}"
+    worker_address = instance.worker_advertise_address or instance.worker_ip
+    url = f"http://{worker_address}:{worker.port}/proxy/v1/{endpoint}"
     token = worker.token
     extra_headers = {
         "X-Target-Port": str(instance.port),
@@ -144,7 +145,8 @@ async def proxy_request_by_model(
     if model.backend == BackendEnum.ASCEND_MINDIE:
         # Connectivity to the loopback address via worker proxy does not work for Ascend MindIE.
         # Bypassing the worker proxy and directly connecting to the instance as a workaround.
-        url = f"http://{instance.worker_ip}:{instance.port}/v1/{endpoint}"
+        instance_address = instance.worker_advertise_address or instance.worker_ip
+        url = f"http://{instance_address}:{instance.port}/v1/{endpoint}"
         extra_headers = {}
 
     logger.debug(f"proxying to {url}, instance port: {instance.port}")
@@ -246,7 +248,7 @@ async def _stream_response_chunks(
     chunk_size = 4096  # 4KB
     chunk_buffer = b""
     async for data in resp.content.iter_chunked(chunk_size):
-        lines = (chunk_buffer + data).split(b'\n')
+        lines = (chunk_buffer + data).split(b"\n")
         # Keep the last line in the buffer if it's incomplete
         chunk_buffer = lines.pop(-1)
 
@@ -311,7 +313,11 @@ async def handle_streaming_request(
                     type="ServiceUnavailable",
                 ),
             )
-            yield error_response.model_dump_json(), {}, status.HTTP_503_SERVICE_UNAVAILABLE
+            yield (
+                error_response.model_dump_json(),
+                {},
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         except Exception as e:
             error_response = OpenAIAPIErrorResponse(
                 error=OpenAIAPIError(
@@ -320,7 +326,11 @@ async def handle_streaming_request(
                     type="InternalServerError",
                 ),
             )
-            yield error_response.model_dump_json(), {}, status.HTTP_500_INTERNAL_SERVER_ERROR
+            yield (
+                error_response.model_dump_json(),
+                {},
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
     return StreamingResponseWithStatusCode(
         stream_generator(), media_type="text/event-stream"
