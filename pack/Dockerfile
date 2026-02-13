@@ -476,8 +476,15 @@ RUN --mount=type=cache,target=/root/.cache \
         WHEEL_PACKAGE="$(ls /workspace/gpustack/dist/*.whl)[audio]";
     fi
 
-    uv pip install --extra-index-url https://download.pytorch.org/whl/cpu/ \
+    # uv pip install --extra-index-url https://download.pytorch.org/whl/cpu/ \
+    #    ${WHEEL_PACKAGE}
+    python -m pip install -U "setuptools<80" wheel
+    python -c "import pkg_resources"
+
+    uv pip install --no-build-isolation \
+        --extra-index-url https://download.pytorch.org/whl/cpu/ \
         ${WHEEL_PACKAGE}
+
 
     # Download tools
     gpustack download-tools
